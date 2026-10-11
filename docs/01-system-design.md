@@ -346,7 +346,7 @@ most 10 messages per second.
 
 - Security headers, set with a `_headers` file and the Worker: `Content-Security-Policy` (`default-src 'self'; img-src 'self' https://photos.<domain> data:; connect-src 'self' wss://<domain>; …`), `Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
 - Markdown is rendered at build time from trusted content, but `rehype-sanitize` is still applied in case content is ever pasted in from elsewhere.
-- The Cloudflare API token used by CI is scoped to the minimum (Workers Scripts:Edit, Workers R2 Storage:Edit, Account Settings:Read) and stored in the **production** GitHub Environment with a required reviewer.
+- The Cloudflare API token used by CI is scoped to the minimum (Workers Scripts:Edit, Workers R2 Storage:Edit, Account Settings:Read) and stored in the `main` GitHub Environment, which only the `main` branch can deploy from (a required reviewer can be added).
 - Dependabot and `pnpm audit` run in CI. GitHub secret scanning and push protection are on.
 
 ---
