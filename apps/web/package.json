@@ -1,0 +1,36 @@
+{
+  "name": "web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "react-router dev",
+    "build": "react-router build",
+    "preview": "react-router build && vite preview",
+    "typegen": "wrangler types && react-router typegen",
+    "typecheck": "pnpm typegen && tsc -b",
+    "deploy": "wrangler deploy"
+  },
+  "dependencies": {
+    "@fontsource/geist-sans": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "isbot": "^5.1.32",
+    "lucide-react": "^1.55.0",
+    "react": "^19.2.1",
+    "react-dom": "^19.2.1",
+    "react-router": "^7.18.4"
+  },
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "^1.63.1",
+    "@react-router/dev": "^7.18.4",
+    "@site/content-schema": "workspace:*",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/node": "^24.0.0",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "tailwindcss": "^4.3.3",
+    "typescript": "~5.9.3",
+    "vite": "^7.3.7",
+    "vite-tsconfig-paths": "^5.1.4",
+    "wrangler": "^4.149.0"
+  }
+}

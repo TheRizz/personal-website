@@ -407,7 +407,7 @@ plus Cloudflare billing and usage notifications.
 
 ## 8. Open questions for the owner
 
-1. **Domain name:** which name and which TLD? `.com` costs about $10.46/yr at Cloudflare and `.dev` about $12/yr.
+1. ~~**Domain name:** which name and which TLD?~~ **Decided:** `ry-mart.com`, registered at Cloudflare. Photos are served from `photos.ry-mart.com`.
 2. **Public or private repo?** A public repo gets unlimited Actions minutes. A private one gets 2,000 minutes a month, which is still plenty.
 3. **Resume privacy:** show phone and address, or only e-mail and LinkedIn?
 4. **Should game lobbies allow spectators?** The design assumes yes, up to 8.

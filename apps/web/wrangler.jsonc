@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "site",
+  "main": "./worker/index.ts",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "upload_source_maps": true,
+
+  // Static assets come from the Vite build; only /api/* reaches the Worker first.
+  "assets": {
+    "binding": "ASSETS",
+    "run_worker_first": ["/api/*"],
+    // Serve prerendered blog/index.html at /blog (no trailing-slash redirect).
+    "html_handling": "drop-trailing-slash",
+  },
+
+  // One Durable Object per game lobby (design doc §4.5).
+  "durable_objects": {
+    "bindings": [{ "name": "GAME_LOBBY", "class_name": "GameLobby" }],
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameLobby"] }],
+
+  // Production domain (hosting guide §2.5). www never reaches the Worker: it
+  // has a proxied placeholder DNS record and a redirect rule to the bare domain.
+  "routes": [{ "pattern": "ry-mart.com", "custom_domain": true }],
+
+  // Keep <subdomain>.workers.dev as the fallback URL and allow PR preview URLs.
+  "workers_dev": true,
+  "preview_urls": true,
+}

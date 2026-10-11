@@ -1,0 +1,6 @@
+pnpm-lock.yaml
+docs/
+apps/web/app/generated/
+worker-configuration.d.ts
+.react-router/
+build/

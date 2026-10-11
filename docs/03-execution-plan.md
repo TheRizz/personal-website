@@ -30,36 +30,44 @@ from the nav yet.
 
 ## Phase 1: Skeleton and deploy pipeline (walking skeleton)
 
+> **Built 2026-10-11.** Deviations from the plan: React Router stays on v7 (v8 is out, but
+> Cloudflare's starter still uses 7). Node 24 instead of 22. `packages/game-core` is
+> created in Phase 7. `GameLobby` is a plain class, not `extends DurableObject`, because
+> React Router prerenders by loading the Worker module in Node, which can't import
+> `cloudflare:workers`. The visual design is modelled on godobject.dev. The PR preview
+> job (Step 1.3) and the uptime monitor (Step 1.5) are not built yet. On phones the nav is
+> a compact row of links rather than a menu button; five links fit at 360 px.
+
 ### Step 1.1: Monorepo scaffold
-- [ ] `pnpm` workspace with `apps/web`, `packages/game-core` and `packages/content-schema` (§4.1).
-- [ ] Root tooling: TypeScript 5 in strict mode, ESLint (flat config), Prettier, `.editorconfig`, `.nvmrc` (Node 22), `.gitignore`.
-- [ ] Root scripts: `dev`, `build`, `lint`, `typecheck`, `test`, `e2e`, `format`.
-- [ ] Vitest workspace config.
+- [x] `pnpm` workspace with `apps/web`, `packages/game-core` and `packages/content-schema` (§4.1).
+- [x] Root tooling: TypeScript 5 in strict mode, ESLint (flat config), Prettier, `.editorconfig`, `.nvmrc` (Node 22), `.gitignore`.
+- [x] Root scripts: `dev`, `build`, `lint`, `typecheck`, `test`, `format`. (`e2e` arrives with Playwright.)
+- [x] Vitest workspace config.
 
 **Done when:** `pnpm install && pnpm lint && pnpm typecheck && pnpm test` passes on a clean clone.
 
 ### Step 1.2: React Router v7 app on a Worker
-- [ ] Scaffold React Router v7 in framework mode with the `@cloudflare/vite-plugin`.
-- [ ] `wrangler.jsonc`: Worker `site`, static assets, `run_worker_first: ["/api/*"]`, and a `GAME_LOBBY` Durable Object binding with a SQLite migration (empty class for now).
-- [ ] Worker entry with `/api/health` returning `{ok, version}`, where version is the git SHA injected at build time.
-- [ ] A placeholder `/` route ("Coming soon").
+- [x] Scaffold React Router v7 in framework mode with the `@cloudflare/vite-plugin`.
+- [x] `wrangler.jsonc`: Worker `site`, static assets, `run_worker_first: ["/api/*"]`, and a `GAME_LOBBY` Durable Object binding with a SQLite migration (empty class for now).
+- [x] Worker entry with `/api/health` returning `{ok, version}`, where version is the git SHA injected at build time.
+- [x] A placeholder `/` route ("Coming soon"). Built as the real home page instead: intro plus the post timeline.
 
 **Done when:** `pnpm dev` serves `/` and `/api/health` locally, and `pnpm build` produces static assets plus the Worker bundle.
 
 ### Step 1.3: CI workflow (`ci.yml`)
-- [ ] Runs on `pull_request`: install with a pnpm cache, then lint, typecheck, test and build.
-- [ ] Pin actions to SHAs, use minimal `permissions`, and use `concurrency` to cancel superseded runs.
+- [x] Runs on `pull_request`: install with a pnpm cache, then lint, typecheck, test and build.
+- [x] Pin actions to SHAs, use minimal `permissions`, and use `concurrency` to cancel superseded runs.
 - [ ] Preview job: `wrangler versions upload --preview-alias pr-<n>`, then post the preview URL as a PR comment that gets updated on each push.
-- [ ] Add Dependabot config for npm and github-actions.
+- [x] Add Dependabot config for npm and github-actions.
 
 **Done when:** a test PR shows a green `ci` check and a working preview URL.
 
 ### Step 1.4: Deploy workflow (`deploy.yml`) and custom domain
-- [ ] Runs on `push` to `main` in the `production` environment with `concurrency: deploy-production`.
-- [ ] Steps: build, then `wrangler deploy`, then the smoke test (curl `/` and `/api/health` and check the version matches the SHA).
-- [ ] On smoke-test failure: `wrangler rollback`, then fail the job.
-- [ ] Separate `rollback.yml` (`workflow_dispatch`).
-- [ ] Custom domain route in `wrangler.jsonc` and a `www` redirect (hosting guide §2.5).
+- [x] Runs on `push` to `main` in the `production` environment with `concurrency: deploy-production`.
+- [x] Steps: build, then `wrangler deploy`, then the smoke test (curl `/` and `/api/health` and check the version matches the SHA).
+- [x] On smoke-test failure: `wrangler rollback`, then fail the job.
+- [x] Separate `rollback.yml` (`workflow_dispatch`).
+- [x] Custom domain route in `wrangler.jsonc` and a `www` redirect (hosting guide §2.5).
 
 **Done when:** merging to `main` updates `https://<domain>/api/health` to the new SHA within about 3 minutes, and a deliberately failing smoke test triggers a rollback (tested once, then reverted).
 
@@ -73,11 +81,11 @@ from the nav yet.
 ## Phase 2: Site shell and design system
 
 ### Step 2.1: Layout and navigation
-- [ ] App shell with header nav (Home, Resume, Blog, Snippets, Photos, Games), a search button, footer and social links.
-- [ ] Responsive at 360 px, 768 px and 1280 px, with a mobile menu.
-- [ ] Styling: Tailwind CSS v4 with CSS-variable design tokens (colour, spacing, type scale).
-- [ ] Error boundary and a 404 route.
-- [ ] Stretch goal: dark mode that follows `prefers-color-scheme`, with a toggle.
+- [x] App shell with header nav (Home, Resume, Blog, Snippets, Photos, Games), a search button, footer and social links.
+- [x] Responsive at 360 px, 768 px and 1280 px, with a mobile menu.
+- [x] Styling: Tailwind CSS v4 with CSS-variable design tokens (colour, spacing, type scale).
+- [x] Error boundary and a 404 route.
+- [x] Stretch goal: dark mode that follows `prefers-color-scheme`, with a toggle.
 
 **Done when:** every nav link resolves (to a placeholder if needed), there are no layout shifts, and axe-core shows 0 serious violations.
 

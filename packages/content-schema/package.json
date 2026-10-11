@@ -1,0 +1,14 @@
+{
+  "name": "@site/content-schema",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "zod": "^4.6.6"
+  }
+}

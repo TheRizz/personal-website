@@ -48,7 +48,7 @@ check you can run to confirm it worked.
 3. ✅ Check: the domain shows as **Active** in the dashboard.
 
 ### 2.2 Workers and R2
-1. **Workers & Pages**: pick a `*.workers.dev` subdomain. This is the fallback URL.
+1. **Workers & Pages**: find **Your subdomain** (`<name>.workers.dev`) and select **Change** if you want a different name. This is the fallback URL. If no subdomain appears yet, one is set up when you create your first Worker or the first time you run `wrangler deploy`. This step doesn't block anything else, since the site is served from your own domain.
 2. **R2 → Enable R2**. Add a payment method if asked; usage under 10 GB is not billed.
 3. Create a bucket named `photos`. Under **Settings → Custom Domains**, attach `photos.<yourdomain>`.
 4. ✅ Check: upload a test image in the dashboard and open `https://photos.<yourdomain>/test.jpg`.
@@ -70,7 +70,8 @@ check you can run to confirm it worked.
 5. ✅ Check: a test PR shows the `ci` check as required.
 
 ### 2.5 Custom domain for the site
-1. In `apps/web/wrangler.jsonc`, add `"routes": [{ "pattern": "<yourdomain>", "custom_domain": true }]`. Add `www.<yourdomain>` too, with a redirect rule from `www` to the bare domain.
+1. In `apps/web/wrangler.jsonc`, add `"routes": [{ "pattern": "<yourdomain>", "custom_domain": true }]`.
+   - For `www`, don't add a Worker route. Add a proxied DNS record instead (**DNS → Records**: type `AAAA`, name `www`, IPv6 `100::`, proxy on). Then create a redirect rule (**Rules → Redirect Rules**) with a wildcard pattern: request URL `https://www.<yourdomain>/*`, target URL `https://<yourdomain>/${1}`, status `301`, **Preserve query string** on. Turn on **SSL/TLS → Edge Certificates → Always Use HTTPS** so `http://` requests are upgraded before the rule runs.
 2. Deploy once (through CI or `wrangler deploy`). Cloudflare creates the DNS records and certificate automatically.
 3. ✅ Check: `curl -I https://<yourdomain>` returns `200` with a valid certificate.
 

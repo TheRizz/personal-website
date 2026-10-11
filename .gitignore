@@ -1,0 +1,25 @@
+# Secrets and local editor settings
+.env
+.env.*
+!.env.example
+.dev.vars*
+.vscode/settings.json
+
+# Dependencies and build output
+node_modules/
+build/
+dist/
+coverage/
+*.tsbuildinfo
+.wrangler/
+.react-router/
+worker-configuration.d.ts
+apps/web/app/generated/
+
+# Test output
+test-results/
+playwright-report/
+
+# OS files
+.DS_Store
+Thumbs.db
