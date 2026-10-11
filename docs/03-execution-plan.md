@@ -63,7 +63,7 @@ from the nav yet.
 **Done when:** a test PR shows a green `ci` check and a working preview URL.
 
 ### Step 1.4: Deploy workflow (`deploy.yml`) and custom domain
-- [x] Runs on `push` to `main` in the `production` environment with `concurrency: deploy-production`.
+- [x] Runs on `push` to `main` in the `main` environment with `concurrency: deploy-production`.
 - [x] Steps: build, then `wrangler deploy`, then the smoke test (curl `/` and `/api/health` and check the version matches the SHA).
 - [x] On smoke-test failure: `wrangler rollback`, then fail the job.
 - [x] Separate `rollback.yml` (`workflow_dispatch`).

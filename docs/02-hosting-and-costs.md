@@ -63,11 +63,17 @@ check you can run to confirm it worked.
 3. ✅ Check: run `CLOUDFLARE_API_TOKEN=… npx wrangler whoami` locally. It should list the account.
 
 ### 2.4 GitHub repository settings
-1. **Settings → Environments → New environment `production`**: add a required reviewer (yourself) and limit deployment to the `main` branch.
-2. Add these environment secrets: `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
-3. **Settings → Branches**: protect `main`. Require PRs, require the `ci` status check, and block force pushes.
+1. **Settings → General → Default branch**: make it `main`. Dependabot opens its pull requests against the default branch.
+2. **Settings → Environments → New environment**, named exactly `main`. The deploy and rollback workflows ask for that name. If it doesn't exist, GitHub quietly creates an empty one, and the deploy fails with "it's necessary to set a CLOUDFLARE_API_TOKEN environment variable".
+   - **Deployment branches and tags:** Selected branches and tags → add `main`.
+   - **Required reviewers** (optional): add yourself, and leave **Prevent self-review** off so you can approve your own deploys.
+   - **Environment secrets** (under Secrets, not Variables): `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.
+3. **Settings → Rules → Rulesets → New branch ruleset** targeting `main`:
+   - Turn on **Restrict deletions**, **Block force pushes**, **Require a pull request before merging** and **Require status checks to pass** (add the `ci` check).
+   - Set **Required approvals** to `0`. GitHub doesn't let you approve your own pull request, so `1` blocks every merge.
+   - Leave **Restrict updates** off. It stops everyone without bypass permission from changing `main`, including by merging pull requests.
 4. **Settings → Code security**: turn on Dependabot alerts and security updates, secret scanning and push protection.
-5. ✅ Check: a test PR shows the `ci` check as required.
+5. ✅ Check: a test PR shows the `ci` check as required and can be merged without an approval. The deploy job's first step, **Check Cloudflare credentials**, passes.
 
 ### 2.5 Custom domain for the site
 1. In `apps/web/wrangler.jsonc`, add `"routes": [{ "pattern": "<yourdomain>", "custom_domain": true }]`.
@@ -103,7 +109,7 @@ runtime as production.
 ```
  PR opened / updated                          push to main
  ─────────────────────                        ─────────────────────────────
- ci.yml                                       deploy.yml (environment: production)
+ ci.yml                                       deploy.yml (environment: main)
   ├─ install (pnpm, cached)                    ├─ needs: same checks as ci.yml
   ├─ lint · typecheck · format check           ├─ build content + app + resume.pdf
   ├─ unit tests (vitest, game-core, worker)    ├─ wrangler deploy

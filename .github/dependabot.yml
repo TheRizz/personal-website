@@ -7,6 +7,12 @@ updates:
     groups:
       minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # Staying on React Router 7 until Cloudflare's starter moves to 8 (execution plan, Phase 1).
+      - dependency-name: react-router
+        update-types: [version-update:semver-major]
+      - dependency-name: "@react-router/*"
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
