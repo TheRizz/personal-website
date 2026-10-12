@@ -39,6 +39,18 @@ jobs:
       # Before the build, which copies .dev.vars (the localhost-only test key) into its output.
       - run: pnpm e2e:keys
       - run: pnpm build
+      # Requests every figure image, so only PRs that change posts depend on photos.ry-mart.com.
+      - name: Check figure images
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git diff --quiet "$BASE_SHA" HEAD -- content/blog/; then
+            echo "No changes under content/blog/; skipping."
+          else
+            pnpm content --check-images
+          fi
       - run: pnpm exec playwright install --with-deps --only-shell chromium
       - run: pnpm e2e
         env:

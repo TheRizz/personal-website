@@ -173,6 +173,42 @@
     @apply border-b border-line px-3 py-2 text-left;
   }
 
+  /*
+   * Image sections (::figure). `column` keeps to the text; `wide` and `full` break out of it,
+   * centred on the page. The `sizes` in packages/content-markdown/src/figure.ts match these widths.
+   */
+  .prose .figure {
+    margin-block: 2.5rem;
+  }
+  .prose .figure--wide {
+    width: min(68.75rem, 100vw);
+    margin-inline: calc((100% - min(68.75rem, 100vw)) / 2);
+  }
+  .prose .figure--full {
+    width: 100vw;
+    margin-inline: calc(50% - 50vw);
+  }
+  /* Edge to edge: no rounded corners or side borders (wide only once it fills the screen). */
+  .prose .figure--full img {
+    @apply w-full rounded-none border-x-0;
+  }
+  @media (width < 68.75rem) {
+    .prose .figure--wide img {
+      @apply rounded-none border-x-0;
+    }
+  }
+  .prose figcaption {
+    @apply mx-auto mt-3 max-w-[72ch] px-6 text-center text-sm leading-relaxed text-muted;
+    text-wrap: balance;
+  }
+  .prose .figure--column figcaption {
+    @apply px-0;
+  }
+  /* 100vw includes a classic scrollbar, so a breakout figure would scroll the page sideways. */
+  html:has(.prose .figure--wide, .prose .figure--full) {
+    overflow-x: clip;
+  }
+
   /* Shiki emits both themes as CSS variables; pick one from the active theme. */
   .shiki,
   .shiki span {
