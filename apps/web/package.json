@@ -14,14 +14,20 @@
   "dependencies": {
     "@fontsource/geist-sans": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
+    "@site/content-markdown": "workspace:*",
     "@site/content-schema": "workspace:*",
     "@site/game-core": "workspace:*",
+    "@tiptap/extensions": "3.31.4",
+    "@tiptap/pm": "3.31.4",
+    "@tiptap/react": "3.31.4",
+    "@tiptap/starter-kit": "3.31.4",
     "isbot": "^5.1.32",
     "jose": "6.2.12",
     "lucide-react": "^1.55.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
-    "react-router": "^7.18.4"
+    "react-router": "^7.18.4",
+    "shiki": "^4.5.0"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.63.1",

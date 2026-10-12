@@ -8,7 +8,10 @@ export default [
   route("games/tictactoe", "routes/games.tictactoe.tsx"),
   route("games/tictactoe/:code", "routes/games.tictactoe.$code.tsx"),
   // Owner only, behind the owner gate (design doc §4.9.2). Never prerendered.
-  route("admin", "routes/admin.tsx", [index("routes/admin._index.tsx")]),
+  route("admin", "routes/admin.tsx", [
+    index("routes/admin._index.tsx"),
+    route("drafts/:id", "routes/admin.drafts.$id.tsx"),
+  ]),
   // Sections that are built in later phases share one placeholder page.
   ...["resume", "snippets", "photos", "search"].map((path) =>
     route(path, "routes/coming-soon.tsx", { id: `coming-soon-${path}` }),

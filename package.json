@@ -10,6 +10,7 @@
     "content": "tsx scripts/build-content.ts",
     "dev": "pnpm content --drafts && pnpm db:migrate:local && pnpm --filter web dev",
     "build": "pnpm content && pnpm --filter web build",
+    "check:bundle": "tsx scripts/check-public-bundle.ts",
     "db:migrate:local": "pnpm --filter web db:migrate:local",
     "lint": "eslint .",
     "typecheck": "pnpm content && pnpm -r typecheck && tsc -p tsconfig.scripts.json && tsc -p e2e/tsconfig.json",

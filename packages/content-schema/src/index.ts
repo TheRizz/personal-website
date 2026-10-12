@@ -1,5 +1,9 @@
 import { z } from "zod";
 
+// Zod's optional JIT probes `new Function`, which the site's CSP blocks and reports as a
+// violation (the admin editor uses this schema in the browser). Parsing works the same without it.
+z.config({ jitless: true });
+
 /** Lowercase kebab-case, e.g. "durable-objects". */
 const tag = z
   .string()
