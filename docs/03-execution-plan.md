@@ -386,14 +386,23 @@ one-click publishing.
 > is missing.
 
 ### Step 10.5: Editor
-- [ ] TipTap, lazy-loaded in `/admin/drafts/:id`. Toolbar: H2, H3, H4, bold, italic, code, link, lists, quote, code block, rule. Raw Markdown tab. Markdown paste.
-- [ ] Metadata panel checked live against `postFrontmatter` (summary counter, tags normalised). No cover picker (§7); an imported `cover` is kept as it is.
-- [ ] Autosave (2 s debounce, 10 s max wait), conflict banner, `BroadcastChannel`, `localStorage` crash copy, stop after 3 errors, revisions drawer with restore.
-- [ ] Preview with `renderMarkdown` and Shiki loaded on first use, styled with the public `.prose` CSS.
-- [ ] "Download .md" and "Copy as Markdown" that produce the exact `content/blog/YYYY-MM-DD-slug.md` file, and mark the draft's images `published = 1`.
-- [ ] Bundle check: no public route chunk contains `@tiptap` or the bridge.
+- [x] TipTap, lazy-loaded in `/admin/drafts/:id`. Toolbar: H2, H3, H4, bold, italic, code, link, lists, quote, code block, rule. Raw Markdown tab. Markdown paste.
+- [x] Metadata panel checked live against `postFrontmatter` (summary counter, tags normalised). No cover picker (§7); an imported `cover` is kept as it is.
+- [x] Autosave (2 s debounce, 10 s max wait), conflict banner, `BroadcastChannel`, `localStorage` crash copy, stop after 3 errors, revisions drawer with restore.
+- [x] Preview with `renderMarkdown` and Shiki loaded on first use, styled with the public `.prose` CSS.
+- [x] "Download .md" and "Copy as Markdown" that produce the exact `content/blog/YYYY-MM-DD-slug.md` file, and mark the draft's images `published = 1`.
+- [x] Bundle check: no public route chunk contains `@tiptap` or the bridge.
 
 **Done when:** e2e types a title, an H2, bold and italic text, reloads, and sees the same content, and the stored `body_md` equals the expected Markdown. Two browser contexts show the 409 banner, and Overwrite keeps the other version as a revision. The downloaded file, committed by hand, builds and deploys. It works with the keyboard only and has been tried on a real phone (iOS Safari and Android Chrome).
+
+> **Built (Step 10.5).** `/admin` lists drafts and has **New post**. The editor lives in
+> `DraftEditor.client.tsx`: the `.client` suffix keeps TipTap out of the server build (bundling
+> it there breaks React Router's server manifest), and `pnpm check:bundle` in CI fails if any
+> public page statically loads ProseMirror or the bridge. The preview uses fine-grained Shiki
+> (the `SHIKI_LANGS`, both themes, the JavaScript regex engine). `content-schema` turns off Zod's
+> JIT, which the CSP reports as `script-src eval`. Marking images `published = 1` on download
+> waits for Step 10.6, since no draft has images before it. Left for the owner: the keyboard-only
+> pass and a try on a real phone.
 
 ### Step 10.6: Image sections
 - [ ] `PHOTOS` R2 binding. `POST /api/admin/images` and `PUT /api/admin/images/:id/:width` with magic-byte sniffing that must match the row's `ext`, the metadata refusal (Exif, XMP, PNG `eXIf`, WebP `EXIF`/`XMP `, GIF XMP), the 10 MB cap and immutable metadata. GIFs are stored as `blog/<id>.gif` (§4.9.6).

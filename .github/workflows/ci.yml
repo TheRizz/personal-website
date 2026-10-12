@@ -39,6 +39,8 @@ jobs:
       # Before the build, which copies .dev.vars (the localhost-only test key) into its output.
       - run: pnpm e2e:keys
       - run: pnpm build
+      # Public pages must never load the editor or the Markdown bridge.
+      - run: pnpm check:bundle
       # Requests every figure image, so only PRs that change posts depend on photos.ry-mart.com.
       - name: Check figure images
         if: github.event_name == 'pull_request'
