@@ -48,14 +48,16 @@ social links live in [`apps/web/app/site.ts`](apps/web/app/site.ts).
 
 ## Planning docs
 
-| Doc                                                                 | What's in it                                                                   |
-| ------------------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| [System design](docs/01-system-design.md)                           | Requirements, architecture, data model, API and WebSocket protocol, trade-offs |
-| [Hosting, purchases and ops](docs/02-hosting-and-costs.md)          | What to buy, account setup, CI/CD, go-live checklist, runbook                  |
-| [Execution plan](docs/03-execution-plan.md)                         | Phased, PR-sized steps with acceptance criteria                                |
-| [ADR-0001: Hosting platform](docs/adr/0001-hosting-platform.md)     | Cloudflare Workers + Durable Objects compared with a Python VPS                |
-| [ADR-0002: Content as code](docs/adr/0002-content-as-code.md)       | Markdown/YAML in git compared with a database and CMS                          |
-| [ADR-0003: Client-side search](docs/adr/0003-client-side-search.md) | MiniSearch compared with server-side full-text search                          |
+| Doc                                                                     | What's in it                                                                         |
+| ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| [System design](docs/01-system-design.md)                               | Requirements, architecture, data model, API and WebSocket protocol, trade-offs       |
+| [Hosting, purchases and ops](docs/02-hosting-and-costs.md)              | What to buy, account setup, CI/CD, go-live checklist, runbook                        |
+| [Execution plan](docs/03-execution-plan.md)                             | Phased, PR-sized steps with acceptance criteria                                      |
+| [ADR-0001: Hosting platform](docs/adr/0001-hosting-platform.md)         | Cloudflare Workers + Durable Objects compared with a Python VPS                      |
+| [ADR-0002: Content as code](docs/adr/0002-content-as-code.md)           | Markdown/YAML in git compared with a database and CMS                                |
+| [ADR-0003: Client-side search](docs/adr/0003-client-side-search.md)     | MiniSearch compared with server-side full-text search                                |
+| [ADR-0004: Owner-only admin](docs/adr/0004-owner-only-admin-access.md)  | Cloudflare Access plus a Worker JWT check, compared with in-app login                |
+| [ADR-0005: In-browser authoring](docs/adr/0005-in-browser-authoring.md) | Private drafts in D1 published as Markdown PRs, compared with D1-first and Decap CMS |
 
 ## Stack at a glance
 

@@ -16,12 +16,22 @@ them on the vendor pages before you buy.
 | GitHub repo and Actions | GitHub Free | $0 | Yes |
 | Web Analytics, DNS, TLS certificates, DDoS protection | Cloudflare | $0 | Included |
 | Email Routing (`hello@yourdomain` forwarded to Gmail) | Cloudflare | $0 | Optional |
+| Zero Trust **Free** plan (Access, guards the owner-only admin) | Cloudflare | $0 for up to 50 users (a payment method is required at sign-up, not charged) | Yes, for the editor (Phase 10) |
+| D1 database `blog` (drafts, revisions, image ledger) | Cloudflare, included in Workers Free | $0 (5 GB, 100k rows written per day) | Yes, for the editor |
+| R2 bucket `blog-backups` (private, nightly draft exports) | Cloudflare | $0 within the same 10 GB | Yes, for the editor |
+| Cron Trigger (daily image clean-up) | Cloudflare, included in Workers Free | $0 (5 per account) | Yes, for the editor |
+| GitHub App (publishes posts as pull requests) | GitHub | $0 | Yes, for one-click publishing |
 | **Total** | | **≈ $10–12 per year** | |
 
 **Upgrade path if you outgrow the free tier:** the Workers Paid plan is $5/month.
 It raises the limits for requests, Durable Objects and logs. You only need it if
 the site gets more than about 100k API requests per day, which is unlikely for a
 personal site. Static page views never count toward that limit.
+
+**Cards on file:** R2 and Zero Trust both ask for a payment method, even on
+their free plans. Neither charges at this usage, and the Workers, D1 and R2
+free limits fail with an error rather than billing. Keep this in mind against
+the "domain only" rule.
 
 **Things you do *not* need to buy:** a VPS, a managed database, an SSL
 certificate, a CDN, an image host, a separate WebSocket service, or e-mail hosting.
@@ -39,7 +49,8 @@ certificate, a CDN, an image host, a separate WebSocket service, or e-mail hosti
 
 ## 2. One-time setup (in order)
 
-Work through these as **Phase 1** of the execution plan. Each step lists a
+Work through §2.1–2.6 as **Phase 1** of the execution plan. §2.7–2.9 belong
+to Step 10.0 and §2.10 to Step 10.7 (owner-only authoring). Each step lists a
 check you can run to confirm it worked.
 
 ### 2.1 Cloudflare account and domain
@@ -60,6 +71,7 @@ check you can run to confirm it worked.
    - Account · Workers R2 Storage · Edit
    - Account · Account Settings · Read
    - Zone · Workers Routes · Edit (limited to your zone)
+   - Account · D1 · Edit (added at Step 10.0: `deploy.yml` applies D1 migrations and `backup.yml` exports the drafts database)
 2. Note your **Account ID**, shown on the Workers overview page.
 3. ✅ Check: run `CLOUDFLARE_API_TOKEN=… npx wrangler whoami` locally. It should list the account.
 
@@ -75,6 +87,13 @@ check you can run to confirm it worked.
    - Leave **Restrict updates** off. It stops everyone without bypass permission from changing `main`, including by merging pull requests.
 4. **Settings → Code security**: turn on Dependabot alerts and security updates, secret scanning and push protection.
 5. ✅ Check: a test PR shows the `ci` check as required and can be merged without an approval. The deploy job's first step, **Check Cloudflare credentials**, passes.
+6. ✅ Check: `gh api repos/TheRizz/personal-website/environments/main/deployment-branch-policies --jq '.branch_policies[].name'` prints only `main`. The `main` environment holds the Cloudflare token, so no other branch may deploy.
+
+> **The live settings don't match this yet** (checked 2026-10-12): the `main`
+> ruleset requires 1 approval, has **Restrict updates** on and no required
+> status check, and auto-merge is off. Every merge goes through the admin
+> bypass. Fix it at the latest at Step 10.7 (§2.10), because publishing from the
+> editor relies on auto-merge.
 
 ### 2.5 Custom domain for the site
 1. In `apps/web/wrangler.jsonc`, add `"routes": [{ "pattern": "<yourdomain>", "custom_domain": true }]`.
@@ -89,6 +108,56 @@ check you can run to confirm it worked.
 - **Web Analytics:** turn it on for the zone. It's cookieless, so you don't need a cookie banner.
 - **Notifications:** turn on "Usage-based billing" and "Workers weekly summary" e-mails, so you hear early if you're getting close to the free limits.
 - **Security → Settings:** "Always Use HTTPS" on, minimum TLS 1.2, HSTS on once everything works.
+
+### 2.7 Cloudflare Access for the admin (Step 10.0)
+1. **Zero Trust** (left menu of dash.cloudflare.com): pick a team name, for example `rymart`, which gives `https://rymart.cloudflareaccess.com`. Choose the **Free** plan and enter payment details. You won't be charged.
+2. **Integrations → Identity providers:** keep the default **Cloudflare** login with **Restrict to account members** on. You already sign in to Cloudflare with Google, so no Google Cloud setup is needed. Don't add One-time PIN.
+   - Only if you chose direct Google login (design doc §8 Q6): in a Google Cloud project, create an External consent screen and a Web OAuth client with origin `https://<team>.cloudflareaccess.com` and redirect URI `https://<team>.cloudflareaccess.com/cdn-cgi/access/callback`, then add Google here.
+3. **Access controls → Applications → Add an application → Self-hosted**, named `Site admin`:
+   - **Destinations:** `ry-mart.com` with path `admin`, and `ry-mart.com` with path `api/admin`. Don't add `/*`: `admin/*` doesn't cover bare `/admin`.
+   - **Session duration:** 24 hours (design doc §8 Q7).
+   - **Login methods:** only the identity provider from step 2, with Instant Auth on.
+   - **Policy** `Owner only`: Action **Allow**, Include **Emails** = your address.
+   - **Cookie settings:** SameSite **Lax** (the default None allows cross-site requests), HttpOnly on, **Binding cookie** on, Cookie Path off.
+   - **CORS settings:** leave empty.
+4. Copy the **Application Audience (AUD) tag** and the team domain into `wrangler.jsonc` as `ACCESS_AUD` and `ACCESS_TEAM_DOMAIN`. They aren't secret.
+5. Never turn on **Protect this Worker** or **Protect all Workers** for the `site` Worker. They answer WebSocket upgrades with 403 and break the games.
+6. ✅ Check: `curl -sI https://ry-mart.com/admin` and `curl -sI https://ry-mart.com/api/admin/me` both return `302` to `<team>.cloudflareaccess.com`. You can sign in with your account, and a private window signed in with another Google account is refused.
+
+### 2.8 D1, backup bucket and image headers (Step 10.0)
+1. `cd apps/web && pnpm wrangler d1 create blog`. Put the `database_id` it prints into `wrangler.jsonc` (binding `DB`, `migrations_dir: "migrations"`). The id isn't secret.
+2. **R2 → Create bucket** `blog-backups`. Don't attach a custom domain and leave r2.dev off. **Settings → Object lifecycle rules:** delete objects after 90 days.
+3. If §2.2 isn't done yet, do it now: image sections need the `photos` bucket at `photos.ry-mart.com`. Leave r2.dev off for `photos` too.
+4. **Rules → Transform Rules → Modify Response Header**: when the hostname equals `photos.ry-mart.com`, set `X-Content-Type-Options` to `nosniff`.
+5. ✅ Check: `pnpm wrangler d1 list` shows `blog`. `curl -sI https://photos.ry-mart.com/test.jpg` shows `x-content-type-options: nosniff`. `blog-backups` shows the lifecycle rule and has no public URL.
+
+### 2.9 Worker secret and CI token (Step 10.0)
+1. `cd apps/web && pnpm wrangler secret put OWNER_EMAIL` with the address from the Access policy. It stays out of the public repo, and a deploy without it fails.
+2. Edit the CI API token from §2.3 and add **Account · D1 · Edit**.
+3. ✅ Check: `pnpm wrangler secret list` shows `OWNER_EMAIL`, and `CLOUDFLARE_API_TOKEN=… pnpm wrangler d1 list` works with the CI token.
+
+### 2.10 GitHub publishing (Step 10.7)
+1. Fix the `main` ruleset to match §2.4: **Required approvals** `0`, **Restrict updates** off, **Require status checks** with `ci` (source: GitHub Actions). Keep the Admin role's bypass. Your own PRs now merge without the bypass once `ci` passes.
+2. **Settings → General → Pull Requests:** turn on **Allow auto-merge** and **Automatically delete head branches**.
+3. **Settings → Rules → Rulesets → New branch ruleset** `bot scope`: target all branches, exclude `main` and `blog/**`. Turn on **Restrict creations**, **Restrict updates** and **Restrict deletions**. Bypass: the Admin role and Dependabot (and any other app that pushes branches for you). This keeps the publishing App on `blog/**` branches.
+4. **Settings (your account) → Developer settings → GitHub Apps → New GitHub App**, for example `ry-mart-publisher`:
+   - Homepage `https://ry-mart.com`. Webhook off. "Only on this account".
+   - Repository permissions: **Contents** read and write, **Pull requests** read and write, **Actions** read, **Checks** read. Metadata read is automatic. **Workflows: no access.**
+   - Generate a private key. **Install** the App on `personal-website` only.
+   - Note the **Client ID**, the **installation ID** (the number at the end of the installation's settings URL) and the bot login, `<app-slug>[bot]` (Step 10.8 needs it).
+   - Never add the App as a bypass actor in any ruleset.
+5. Convert and store the key, then delete the files:
+   ```sh
+   openssl pkcs8 -topk8 -nocrypt -in app.pem -out app-pkcs8.pem
+   cd apps/web
+   pnpm wrangler secret put GITHUB_APP_PRIVATE_KEY < ../../app-pkcs8.pem
+   pnpm wrangler secret put GITHUB_APP_CLIENT_ID
+   pnpm wrangler secret put GITHUB_APP_INSTALLATION_ID
+   ```
+6. ✅ Check: `gh api repos/TheRizz/personal-website --jq '{allow_auto_merge, delete_branch_on_merge}'` shows both `true`.
+7. ✅ Check: `gh api repos/TheRizz/personal-website/rulesets` lists both rulesets. The `main` one has a `required_status_checks` rule with `ci`, `required_approving_review_count: 0` and no `update` rule. Neither lists the App as a bypass actor.
+8. ✅ Check: a throwaway PR with auto-merge turned on merges by itself after `ci` passes, with no approval and no bypass.
+9. ✅ Check: `pnpm wrangler secret list` shows the three `GITHUB_APP_*` names. The App's installation page lists only `personal-website`.
 
 ---
 
@@ -135,7 +204,14 @@ SHA, set `permissions:` to the minimum each job needs, and use
 `ci.yml` runs the Playwright e2e suite after `pnpm build`. It installs Chromium,
 serves that build with `vite preview` on port 4173 (`CI=true` stops it building
 again) and uploads `playwright-report/` as an artifact when a test fails. The
-preview job is not built yet.
+preview job is not built yet, and can't work as drawn: version URLs aren't
+generated for a Worker that has a Durable Object (execution plan Step 1.3).
+
+Phase 10 adds:
+- `deploy.yml` runs `wrangler d1 migrations apply blog --remote` before `wrangler deploy`. Migrations only add tables and columns, because `wrangler rollback` doesn't roll back D1.
+- `backup.yml` runs nightly in the `main` environment: `wrangler d1 export` of `blog` into `blog-backups`. It never prints content, because Actions logs on a public repo are public.
+- `ci.yml` gets a first step that fails a PR when the publishing App's bot authored it or committed to it and it touches anything outside `content/blog/`, and runs `build-content --check-images` when posts change.
+- PR CI never gets Cloudflare or GitHub App secrets. E2E uses a test identity that works only on localhost (design doc §4.9.9).
 
 ---
 
@@ -165,6 +241,18 @@ infrastructure change.
 - [ ] An invalid code shows a friendly "Lobby not found" message
 - [ ] Creating more than 10 lobbies a minute from one IP returns 429
 
+**Authoring (owner only, after Phase 10)**
+- [ ] In a private window, `/admin` and `/api/admin/me` go to the Access login, and another account is refused
+- [ ] `/ADMIN` and `/%61dmin` go to the login or return 404, never the editor
+- [ ] `https://site.<subdomain>.workers.dev/api/admin/me` doesn't resolve or returns 404, even with a made-up `Cf-Access-Jwt-Assertion` header
+- [ ] Signed in, `https://ry-mart.com/api/admin/me` shows your e-mail, and a blog post shows **Edit**. A private window shows no Edit link.
+- [ ] Page source of a blog post contains no admin markup
+- [ ] A form on another origin that POSTs to `/api/admin/drafts` is refused
+- [ ] An SVG upload is refused. A phone photo uploaded through the editor has no GPS data (`exiftool` on the downloaded variant).
+- [ ] A test post goes from Publish to Live in the editor, then unpublishes the same way
+- [ ] Sign out works, and reloading `/admin` asks you to sign in again
+- [ ] The nightly backup ran, and its log shows no draft text
+
 **Operations**
 - [ ] Deploying a deliberately broken commit to a preview fails the smoke test (test the rollback path once)
 - [ ] `wrangler rollback` works when run by hand
@@ -178,13 +266,22 @@ infrastructure change.
 
 | Task | How |
 |------|-----|
-| Publish a blog post | Add `content/blog/YYYY-MM-DD-slug.md`, open a PR, check the preview URL, merge |
+| Write a post | `/admin` → **New post**. It autosaves a few seconds after you stop typing. **Image** uploads a photo and inserts an image section; set its alt text, caption and size, and move it with the arrows. |
+| Publish a post from the editor | **Publish** → confirm. The text is public on a GitHub PR from that moment. The status goes PR opened → CI → merging → deploying → Live, about 4 minutes. Before Step 10.9 ships: **Download .md**, add it to `content/blog/` and open a PR. |
+| Publish a blog post by hand | Add `content/blog/YYYY-MM-DD-slug.md`, open a PR, merge once `ci` passes |
+| Edit a published post | **Edit** on the post (signed in), or `/admin` → the post → **Edit**. Change it, then **Publish changes** (about 4 minutes, even for a typo). |
+| Unpublish a post | `/admin` → the post → **Unpublish**. It's gone after the next deploy, about 4 minutes, but stays in git history. |
+| Take a post down right now | **Security → WAF → Custom rules → Create rule**: URI Path equals `/blog/<slug>`, action Block. Works in seconds. Then unpublish, and delete the rule once the deploy is live. Do the same if a `wrangler rollback` brings back an unpublished post. |
+| Publish stuck | CI failed: open the run from the editor, fix the post, **Fix and republish**, or **Cancel** (closes the PR and deletes the branch). Deploy failed: **Actions → deploy → Re-run jobs**. |
+| Restore a draft | Revisions drawer → **Restore**. Older or deleted: `pnpm wrangler d1 time-travel restore blog --timestamp=<ISO time>` (last 7 days, rewinds the whole database, so export first). Older still: download the export from `blog-backups`, load it into a scratch database with `wrangler d1 execute <scratch> --file=<export>.sql` and copy the row back. |
+| Revoke admin access | Sign out on one device: `https://ry-mart.com/cdn-cgi/access/logout`. Everywhere: **Zero Trust → Access controls → Applications → Site admin → Revoke existing tokens**. |
+| Rotate the GitHub App key | App settings → **Generate a private key** → convert to PKCS#8 → `pnpm wrangler secret put GITHUB_APP_PRIVATE_KEY` → test a publish → delete the old key in the App settings |
 | Add a snippet | Add `content/snippets/<slug>.md`, open a PR, merge |
 | Add photos | `pnpm photos:upload ./my-folder --album yosemite-2026 --tags hiking,landscape`. This resizes, uploads to R2 and adds to `photos.yaml`. Commit the manifest and open a PR. |
 | Update resume | Edit `content/resume.yaml` and merge. CI regenerates the PDF. |
 | Roll back production | `pnpm wrangler rollback` or the GitHub Actions "Rollback" `workflow_dispatch` |
 | See errors | Cloudflare dashboard → Workers → `site` → Logs / Observability |
-| Rotate the API token | Create a new token, update the GitHub environment secret, revoke the old token |
+| Rotate the API token | Create a new token with the same permissions (including D1 Edit), update the GitHub environment secret, revoke the old token |
 | Run the e2e tests locally | `pnpm e2e`. It builds, serves the build on port 4173 and runs Playwright. If a server is already running on 4173, it reuses that server and skips the build, so stop it or rebuild after changing code. Set `E2E_PORT` to use another port. |
 | Debug a failed e2e run in CI | Download the `playwright-report` artifact from the run and open it with `pnpm exec playwright show-report <folder>`. Failed tests keep a trace. |
 | Free limit reached | Workers & Pages → Plans → Workers Paid ($5/month). No code change needed. |
