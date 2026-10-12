@@ -40,7 +40,7 @@ Constraints:
 
 ### Draft storage (A)
 - **D1 (chosen):** SQL, migrations, a revision check for autosave, 7 days of Time Travel, 100k writes a day free.
-- KV allows 1,000 writes a day and is eventually consistent, so autosave would break. A Durable Object has the same limits as D1 without migrations tooling or Time Travel. JSON objects in R2 can't be queried.
+- KV allows 1,000 writes a day and is eventually consistent, so autosave would break. A SQLite Durable Object has the same limits as D1 and its own 30-day point-in-time recovery, but no `wrangler` migrations or export commands and no dashboard or CLI restore, so all of that would be code we write. JSON objects in R2 can't be queried.
 
 ## Decision
 
@@ -59,7 +59,7 @@ its main costs (about 4 minutes to publish, two stores) are stated and tested.
 - This amends ADR-0002's "Upgrade path": the in-browser editor replaces the git-backed CMS idea, and the storage model for published posts doesn't change. Hand-written `content/blog/*.md` files keep working.
 - New resources: a D1 database `blog`, a private R2 bucket `blog-backups` for nightly draft exports, a GitHub App with Contents and Pull requests write on this repo only, and one daily cron. All are $0.
 - The `main` ruleset has to match hosting guide §2.4 (0 approvals, a required `ci` check, Restrict updates off) and auto-merge has to be on. The owner's own PRs then merge without the admin bypass once `ci` passes.
-- The App is never a ruleset bypass actor. A second ruleset limits it to `blog/**` branches, and `ci.yml` fails any PR whose bot commits touch files outside `content/blog/`.
+- The App is never a ruleset bypass actor. A second ruleset limits it to `blog/**` branches, and `ci.yml` fails any PR whose bot commits touch files outside `content/blog/`. It can still merge any PR whose `ci` is green, so `deploy.yml` refuses to deploy a bot merge that touches code (design doc §4.9.7).
 - Publishing makes the text public on a GitHub PR about 4 minutes before it is live, and it stays in history even if CI fails. The publish dialog says so.
 - Slugs are locked after the first publish, because there is no redirect mechanism yet.
 - The first save of an old hand-written post through the editor normalises its Markdown (`-` bullets, `*` emphasis), which gives a one-time noisy diff.

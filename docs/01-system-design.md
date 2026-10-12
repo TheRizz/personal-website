@@ -446,9 +446,9 @@ protocol (including hibernation) and two players in separate browser contexts.
 
 - Security headers, set with a `_headers` file and the Worker: `Content-Security-Policy` (`default-src 'self'; img-src 'self' https://photos.<domain> data:; connect-src 'self' wss://<domain>; …`), `Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
 - Markdown is rendered at build time from trusted content, but `rehype-sanitize` is still applied in case content is ever pasted in from elsewhere.
-- The Cloudflare API token used by CI is scoped to the minimum (Workers Scripts:Edit, Workers R2 Storage:Edit, Account Settings:Read, and D1:Edit once the authoring migrations and backups exist) and stored in the `main` GitHub Environment, which only the `main` branch can deploy from (a required reviewer can be added).
+- The Cloudflare API token used by CI is scoped to the minimum (Workers Scripts:Edit, Workers R2 Storage:Edit, Account Settings:Read, and D1:Edit once the authoring migrations exist) and stored in the `main` GitHub Environment, which only the `main` branch can deploy from (a required reviewer can be added). It is set only on the Wrangler steps (migrations, deploy, rollback), never on the job, so `pnpm install` and `pnpm build` run without it. The nightly backup has its own narrower credentials (hosting guide §2.9).
 - Dependabot and `pnpm audit` run in CI. GitHub secret scanning and push protection are on.
-- The site-wide CSP above isn't shipped yet (there is no `_headers` file). It ships with Step 10.11 at the latest, because XSS anywhere on `ry-mart.com` could make same-origin admin calls while the owner is signed in. `img-src` must include `https://photos.ry-mart.com`.
+- The site-wide CSP above isn't shipped yet (there is no `_headers` file). It ships with Step 10.1, before any owner session can exist, because XSS anywhere on `ry-mart.com` could make same-origin admin calls while the owner is signed in. `img-src` must include `https://photos.ry-mart.com`.
 - The admin area has its own stricter rules. §4.9.8 lists them.
 
 ### 4.9 Authoring (owner only)
@@ -476,7 +476,10 @@ TipTap editor ── autosave ──────────▶ PUT /api/admin/d
 
 #### 4.9.1 Access control
 
-Two layers. Each one alone should stop an outsider.
+Two layers. Each one alone should stop an outsider. The Worker serves admin
+only on the exact paths Access covers, so every admin request has passed Access
+too, and Access's own controls (binding cookie, logout, token revocation) apply
+to all of them.
 
 **Layer 1, Cloudflare Access (edge).** Zero Trust Free, one self-hosted app
 "Site admin" with two destinations: `ry-mart.com` path `admin` and
@@ -493,11 +496,12 @@ handler, so it also covers requests that fall through to the Worker without
 matching `run_worker_first`. The admin router is mounted behind it, so no route
 opts in on its own.
 
-1. **Is it admin?** Canonicalise the path: percent-decode (a decode error is 400), lowercase, collapse `//`, strip a trailing `.data`. Admin means `/admin`, `/admin/…`, `/api/admin` or `/api/admin/…`. React Router 7 matches `/ADMIN`, `/%61dmin` and `/admin.data` to admin routes, and Access's handling of those isn't documented. Handlers then match exact lowercase paths only.
-2. **Host.** 404 unless the host is `ry-mart.com`. `workers_dev` is set to `false` too. Version and preview URLs don't exist for a Worker with a Durable Object, and the host check covers them if that changes.
-3. **Token.** Read `Cf-Access-Jwt-Assertion`, falling back to the `CF_Authorization` cookie. Verify with `jose`: RS256 only, issuer = team domain, audience = the app's AUD tag, keys from `<team>/cdn-cgi/access/certs` (fetched once per isolate, matched by `kid`). Then require `type === "app"` and `email` equal to the `OWNER_EMAIL` secret, ignoring case. Any failure is a 404. A failed key fetch is a 503.
-4. **Writes** (POST, PUT, PATCH, DELETE). Require `Origin: https://ry-mart.com`, `Sec-Fetch-Site: same-origin` when the header is present, `Content-Type: application/json` (`image/*` on uploads) and `X-Admin: 1`. A cross-site request then needs a preflight, and Access answers the cookie-less `OPTIONS` with 403. Admin routes never send CORS headers.
-5. **Every admin response** gets `Cache-Control: no-store, private`, `X-Robots-Tag: noindex`, `X-Frame-Options: DENY` and `frame-ancestors 'none'`. `robots.txt` gets `Disallow: /admin`.
+1. **Is it admin?** Canonicalise the path to *detect* admin: percent-decode (a decode error is 400), lowercase, collapse `//`, strip a trailing `.data`. Admin means `/admin`, `/admin/…`, `/api/admin` or `/api/admin/…`. React Router 7 matches `/ADMIN`, `/%61dmin` and `/admin.data` to admin routes, and Access's handling of those isn't documented.
+2. **Exact path only.** If the raw path isn't already in canonical form (any capital letter, `%`, `//` or `.data`), return 404 before looking at a token. Only the lowercase spellings Access covers are ever served (draft ids, image ids and slugs are lowercase too). No admin route and no route above it (root included) has a server `loader` or `action`, so the client never needs `/admin.data`.
+3. **Host.** 404 unless the host is `ry-mart.com`. `workers_dev` and `preview_urls` are set to `false`. Version URLs aren't generated for a Worker with a Durable Object. Previews (`wrangler preview`) can still exist; they don't inherit production secrets or bindings, and the host check covers them.
+4. **Token.** Read only the `Cf-Access-Jwt-Assertion` header. On `ry-mart.com` a missing header means Access wasn't in front, so it is a 404 and a log line (never the token). There is no cookie fallback. Verify with `jose`: RS256 only, issuer = team domain, audience = the app's AUD tag, `maxTokenAge` = the session length, keys from `<team>/cdn-cgi/access/certs` (fetched once per isolate, matched by `kid`). Then require `type === "app"` and `email` equal to the `OWNER_EMAIL` secret, ignoring case. Any failure is a 404. A missing `OWNER_EMAIL` fails closed. A failed key fetch is a 503.
+5. **Writes** (POST, PUT, PATCH, DELETE). Require `Origin: https://ry-mart.com`, `Sec-Fetch-Site: same-origin` when the header is present, `Content-Type: application/json` (`image/*` on uploads) and `X-Admin: 1`. A cross-site request then needs a preflight, and Access answers the cookie-less `OPTIONS` with 403. Admin routes never send CORS headers.
+6. **Every admin response** gets `Cache-Control: no-store, private`, `X-Robots-Tag: noindex`, `X-Frame-Options: DENY` and `frame-ancestors 'none'`. `robots.txt` gets `Disallow: /admin`.
 
 `run_worker_first` becomes `["/api/*", "/admin", "/admin/*"]`, and `/admin` is
 never in the prerender list. Admin routes have no server loader or action that
@@ -511,9 +515,10 @@ when that cookie exists, and shows "Edit" only on a 200. A visitor without the
 cookie makes no admin request at all. A forged cookie costs one failed probe.
 "Sign out" links to `/cdn-cgi/access/logout` and clears the hint.
 
-**Expired sessions.** The admin bundle wraps `fetch` for `/api/admin/*` and adds
+**Expired sessions.** The admin bundle wraps `fetch` for `/api/admin/*`. It adds
 `X-Requested-With: XMLHttpRequest`, so Access answers an expired session with
-401 rather than a cross-origin redirect. The editor then shows "Session expired,
+401 rather than a cross-origin redirect, and `X-Admin: 1`, which the gate
+requires on every write. The editor then shows "Session expired,
 sign in again" and keeps the unsaved text in `localStorage`.
 
 #### 4.9.2 Admin routes and API
@@ -531,7 +536,7 @@ sign in again" and keeps the unsaved text in `localStorage`.
 | `GET`, `PUT`, `DELETE` | `/api/admin/drafts/:id` | load · autosave `{baseRev, …fields}` → `200 {rev}` or `409 {rev, updatedAt}` · discard (deletes its images) |
 | `GET`, `POST` | `/api/admin/drafts/:id/revisions`, `…/revisions/:rev/restore` | list · restore (a new rev with reason `restore`) |
 | `POST` | `/api/admin/images` | `{draftId, ext, width, height, alt}` → `201 {id, widths}` |
-| `PUT` | `/api/admin/images/:id/:width` | raw bytes → `200` · `413` over 10 MB · `415` not JPEG, PNG, WebP or GIF |
+| `PUT` | `/api/admin/images/:id/:width` | raw bytes → `200` · `413` over 10 MB · `415` not JPEG, PNG, WebP or GIF, not the type recorded for `:id`, or carrying metadata |
 | `GET` | `/api/admin/posts` | published posts on `main`, with blob SHAs |
 | `POST` | `/api/admin/drafts/:id/publish` | → `202 {pr, branch}` · `409` changed on GitHub · `422` validation errors |
 | `GET` | `/api/admin/drafts/:id/status` | → `{stage, pr, runUrl?, mergeSha?}` |
@@ -544,10 +549,11 @@ Errors use the same JSON shape as the rest of `/api` (§4.5).
 
 - **Library:** TipTap 3 (`@tiptap/react`, `@tiptap/pm`, `@tiptap/starter-kit`, `@tiptap/extensions`), exact versions pinned. Not `@tiptap/markdown` (it corrupts content) and not the drag-handle extension (it pulls in yjs).
 - **Effects:** H2, H3 and H4 (H1 is the title, a separate field; type `## ` or press `Mod-Alt-2/3/4`), bold (`Mod-B`), italic (`Mod-I`), inline code, links, bullet and numbered lists, quotes, code blocks with a language picker, horizontal rules and image sections. Underline is off, because Markdown can't store it.
-- **Layout:** a fixed toolbar on every screen size (a bubble menu fights the phone's own selection menu). A metadata panel above the body: title, summary (1–300 characters, with a counter), category, tags and cover image, checked live against the shared `postFrontmatter` schema. A **Raw Markdown** tab is the escape hatch when the editor misbehaves.
+- **Layout:** a fixed toolbar on every screen size (a bubble menu fights the phone's own selection menu). A metadata panel above the body: title, summary (1–300 characters, with a counter), category and tags, checked live against the shared `postFrontmatter` schema. A **Raw Markdown** tab is the escape hatch when the editor misbehaves.
 - **Preview:** side by side on desktop, a tab on phones. It runs the same `renderMarkdown()` as the build, debounced 300 ms, with Shiki loaded on first use (about 135 KB gzipped). It uses the same `.prose` and figure CSS as the public page, so it looks like the live post. Languages missing from the shared list show as plain text in the preview only.
 - **Paste:** plain-text Markdown on the clipboard goes through the bridge.
-- **"Download .md" and "Copy as Markdown"** give the exact `content/blog/YYYY-MM-DD-slug.md` file. Before the publish steps ship, this is how a post gets published: commit the file through a normal PR. It is also a per-draft backup.
+- **"Download .md" and "Copy as Markdown"** give the exact `content/blog/YYYY-MM-DD-slug.md` file. Before the publish steps ship, this is how a post gets published: commit the file through a normal PR. It is also a per-draft backup. Downloading or copying marks the draft's images `published = 1`, because the file may now be live (§4.9.6).
+- **No cover upload yet.** Public pages don't render `cover` today. The editor keeps an imported post's `cover` value as it is and has no picker (§7).
 - **Bundle:** the editor loads with `React.lazy` inside `/admin` only, with `useEditor({immediatelyRender: false})` because the app server-renders. About 191 KB gzipped, plus Shiki on first preview. A CI check fails if a public route chunk imports `@tiptap` or the bridge.
 
 #### 4.9.4 Document format and image sections
@@ -578,7 +584,8 @@ the one pipeline used by `build-content.ts`, the preview and the editor:
 and 1024 that is narrower than `w`, plus one at `w` itself (`w` is at most 2048;
 bigger images are scaled down first). The build works out the same list from
 `w`, so it needs no database. A GIF is stored once, as `blog/<uuid>.gif`, with
-no `srcset`. The `cover` frontmatter field uses the same logical key.
+no `srcset`: `POST /api/admin/images` returns `widths: [w]` for it, and the
+`PUT` for that width writes the key without a width suffix.
 
 **Rendered HTML** (build and preview):
 
@@ -615,7 +622,7 @@ CREATE TABLE drafts (
   summary TEXT NOT NULL DEFAULT '',
   category TEXT,
   tags TEXT NOT NULL DEFAULT '[]',   -- JSON array
-  cover_key TEXT,                    -- logical key, like frontmatter `cover`
+  cover_key TEXT,                    -- kept from an imported post; no upload UI yet
   body_md TEXT NOT NULL DEFAULT '',  -- Markdown, at most 512 KB
   rev INTEGER NOT NULL DEFAULT 1,
   status TEXT NOT NULL DEFAULT 'draft'
@@ -672,17 +679,19 @@ content, because Actions logs on a public repo are public), and the per-draft
 
 #### 4.9.6 Image uploads
 
-1. **Browser** (admin only): `createImageBitmap` applies the EXIF rotation. Canvas resizes to the variant widths (never upscaling) and encodes WebP at quality 0.8. Safari can't encode WebP from a canvas, so when `blob.type` isn't `image/webp` it lazy-loads `@jsquash/webp` or falls back to JPEG at 0.82. Re-encoding keeps only pixels, so EXIF and GPS are gone. GIFs are uploaded as they are. SVG and AVIF are refused. Alt text is required before the image is inserted.
+1. **Browser** (admin only): `createImageBitmap` applies the EXIF rotation. Canvas resizes to the variant widths (never upscaling) and encodes WebP at quality 0.8. Safari can't encode WebP from a canvas, so when `blob.type` isn't `image/webp` it lazy-loads `@jsquash/webp` or falls back to JPEG at 0.82. Re-encoding keeps only pixels, so EXIF and GPS are gone. GIFs (chosen by sniffing the file's bytes, not by its name or `file.type`) are uploaded as they are. SVG and AVIF are refused. Alt text is required before the image is inserted.
 2. `POST /api/admin/images` returns a server-made UUID and the widths to upload, and writes a `pending` row.
-3. `PUT /api/admin/images/:id/:width` per variant. The Worker checks the owner and CSRF rules, requires `Content-Length` ≤ 10 MB, reads the bytes and sniffs magic bytes (JPEG `FF D8 FF`, PNG `89 50 4E 47`, GIF `GIF8`, WebP `RIFF…WEBP`). Anything else is 415, whatever the client claimed. It then calls `PHOTOS.put("blog/<id>-<width>.<ext>", bytes, {httpMetadata: {contentType: <sniffed>, cacheControl: "public, max-age=31536000, immutable", contentDisposition: "inline"}})` and marks the row `ready` when every width is there.
+3. `PUT /api/admin/images/:id/:width` per variant. The Worker checks the owner and CSRF rules, requires `Content-Length` ≤ 10 MB, reads the bytes and sniffs magic bytes (JPEG `FF D8 FF`, PNG `89 50 4E 47`, GIF `GIF8`, WebP `RIFF…WEBP`). Anything else is 415, whatever the client claimed. The sniffed type must match the `ext` in the `images` row. The Worker also refuses (415) any file that carries metadata: JPEG `APP1` (Exif or XMP), PNG `eXIf` or an XMP `iTXt`, WebP `EXIF` or `XMP ` chunks (or those `VP8X` flags), a GIF XMP application extension. So a client bug can't publish a location; the browser step is not the only control. It then calls `PHOTOS.put("blog/<id>-<width>.<ext>", bytes, {httpMetadata: {contentType: <sniffed>, cacheControl: "public, max-age=31536000, immutable", contentDisposition: "inline"}})` (`blog/<id>.gif` for a GIF) and marks the row `ready` when every width is there.
 4. The editor inserts the figure node: a preview, required alt, size picker, **Move up / Move down / Remove** buttons (also `Alt+Shift+Up/Down`, because dragging doesn't work on phones) and an inline caption that takes bold, italic and links.
 
 A Transform Rule on `photos.*` adds `X-Content-Type-Options: nosniff` (R2
 metadata can't set it). **Privacy:** draft images are public to anyone who has
 the URL, but the keys have 122 random bits and public buckets can't be listed.
 **Clean-up:** each save marks images the draft no longer uses as orphans.
-Discarding a never-published draft deletes its objects (deletes are free) and
-rows. A daily cron (`scheduled()`, 1 of 5 free) deletes `pending` rows older
+Discarding a draft deletes the objects and rows of its images that aren't
+`published` (deletes are free). An image becomes `published` when the draft
+goes Live, or earlier when its `.md` is downloaded or copied, since that file
+may have been committed by hand. A daily cron (`scheduled()`, 1 of 5 free) deletes `pending` rows older
 than a day and unpublished orphans older than 7 days. An image that was ever
 published is never deleted automatically. A deleted object can stay in the
 edge cache for up to a year unless purged by URL.
@@ -692,7 +701,7 @@ edge cache for up to a year unless purged by URL.
 **Checks before anything leaves D1.** The browser renders the post with
 `renderMarkdown()` and runs `postFrontmatter`, and blocks Publish on any error.
 The Worker runs `postFrontmatter` again, a regex lint of each `::figure` line,
-checks that every figure and cover key is a `ready` row in `images`, checks the
+checks that every figure key is a `ready` row in `images`, checks the
 target path against `^content/blog/\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`,
 and checks the slug against `main` and open `blog/*` PRs. The Worker never runs
 unified or Shiki (10 ms CPU). CI is the final check.
@@ -706,7 +715,8 @@ about 4 minutes.
 local date at first publish, and the slug comes from the title (editable until
 the first publish, then locked). Frontmatter is written value by value with
 `JSON.stringify` (valid YAML): `title`, `summary`, `date`, `updated` on edits,
-`category`, `tags`, `cover`. Never `slug` or `draft`.
+`category`, `tags`, and `cover` only when an imported post already had one.
+Never `slug` or `draft`.
 
 **Publish** (`POST /api/admin/drafts/:id/publish`, about 9 GitHub calls, under
 the 50-subrequest limit, all with a `User-Agent` and an installation token):
@@ -715,10 +725,10 @@ the 50-subrequest limit, all with a `User-Agent` and an installation token):
 2. `GET git/ref/heads/main` → commit M and tree T.
 3. For an edit, compare the file's blob SHA on M with `base_sha`. Different means someone changed it in git: `409`, and the editor offers to load the GitHub version. It never overwrites silently.
 4. `POST git/trees` with `base_tree: T`: the file, plus `sha: null` for an old path on unpublish.
-5. `POST git/commits` (author: the owner; committer: the App's bot) → C.
+5. `POST git/commits` → C. Author: the owner's GitHub no-reply identity from the plain var `GIT_AUTHOR` (`TheRizz <19941577+TheRizz@users.noreply.github.com>`), never `OWNER_EMAIL`, which would go into public history. Committer: the App's bot. A unit test checks that no GitHub request body contains `OWNER_EMAIL`.
 6. `POST git/refs` → `refs/heads/blog/<slug>-<unix time>`.
 7. `POST pulls`. The body lists the slug, word count and image keys, nothing else.
-8. GraphQL `enablePullRequestAutoMerge` (squash, `expectedHeadOid: C`). If GitHub says the PR is already mergeable, fall back to `PUT pulls/{n}/merge`.
+8. GraphQL `enablePullRequestAutoMerge` (squash, `expectedHeadOid: C`). There is no immediate-merge fallback. If GitHub says the PR is already mergeable, the required `ci` check is missing from the ruleset: the publish stops with "Repo settings changed: `ci` isn't required" and the PR waits for the owner.
 
 Publishing again while that PR is open pushes a new commit to the same branch
 (`PATCH git/refs`, `force: false`) instead of opening a second PR.
@@ -745,33 +755,41 @@ effect in seconds (hosting guide §6).
 **The App's reach.** Contents and Pull requests write, Actions and Checks read,
 no Workflows permission, installed on this repo only, and never a ruleset bypass
 actor. A second ruleset stops it from creating or updating any branch except
-`blog/**` (`main` changes only through a PR that passes `ci`). A `ci.yml` step
-fails a PR when the PR author is the bot, or any commit committed by the bot,
-touches a file outside `content/blog/`. Without Workflows permission the App
-can't remove that step.
+`blog/**` (`main` changes only through a PR that passes `ci`). That still lets
+it merge, or turn on auto-merge for, **any** open PR whose `ci` is green
+(Dependabot's, the owner's unfinished work, or a stranger's fork PR), close
+PRs, and create tags (nothing deploys from a tag). Two guards limit what that
+can ship:
+
+- **`ci.yml`:** a first step, inline in the YAML and run before checkout and `pnpm install`, reads the PR's file list from the API and fails when the PR author is the bot, or any commit has the bot as committer, and a file outside `content/blog/` changed. It runs no script from the repo, because the Workflows permission protects only `.github/workflows/`, not `.github/scripts/`.
+- **`deploy.yml`:** runs on `main` after the merge. The App has no Workflows permission, so GitHub refuses its commits and merges that edit `.github/workflows/` (Step 10.8 confirms this). Before install, build or deploy, it fails when `github.actor`, or the author or merger of the PR behind the commit, is the bot and the compare API's file list for `<before>...<sha>` touches anything outside `content/blog/`. A failed deploy e-mails the owner, who reverts the merge.
+
+Both guards depend on the `ci` check staying required in the `main` ruleset;
+hosting guide §2.10 checks it.
 
 #### 4.9.8 Security
 
 | Threat | Defence |
 |--------|---------|
-| Reaching admin on a host Access doesn't cover (`*.workers.dev`, future previews) | Host check (404), JWT check on every admin request, `workers_dev: false` |
-| Path variants (`/ADMIN`, `/%61dmin`, `/admin.data`) | Canonicalise before the admin check. The gate runs first for every request that reaches the Worker. No server data in admin routes. |
-| Forged or replayed token | RS256 against the team keys, exact issuer and audience, `type: app`, owner e-mail. Binding cookie stops replay of a stolen cookie. Logout revokes everywhere in about 30 s. |
+| Reaching admin on a host Access doesn't cover (`*.workers.dev`, Previews) | Host check (404), JWT check on every admin request, `workers_dev: false`, `preview_urls: false` |
+| Path variants (`/ADMIN`, `/%61dmin`, `/admin.data`) Access may not match | Canonicalise to detect admin, then 404 any spelling that isn't already canonical, even with a valid token. The gate runs first for every request that reaches the Worker. No server loaders in the admin branch. |
+| Forged or replayed token | RS256 against the team keys, exact issuer and audience, `maxTokenAge`, `type: app`, owner e-mail. Header only, no cookie fallback. The binding cookie, logout (about 30 s) and "Revoke existing tokens" are enforced by Access, and they cover every admin request because only Access-matched paths are served. |
 | CSRF (the Access cookie defaults to SameSite None) | SameSite Lax, plus Origin, Sec-Fetch-Site, content type and `X-Admin` checks. No CORS headers. |
 | XSS riding the owner's session | Only Markdown is stored. All HTML comes from the shared pipeline with `rehype-sanitize`. Figure `src` must be an R2 key. No raw HTML. Admin CSP: `default-src 'self'; script-src 'self' 'nonce-…' 'wasm-unsafe-eval'; img-src 'self' https://photos.ry-mart.com blob: data:; connect-src 'self'; frame-ancestors 'none'` (a per-request nonce for React Router's inline scripts). Site-wide CSP from §4.8. |
-| Malicious upload (SVG with script, polyglot, huge file) | Magic-byte allowlist, type set from the sniff, `nosniff`, inline disposition, 10 MB cap, owner only |
-| Private data in the public repo | Drafts only in D1. Owner e-mail and App key are Worker secrets. EXIF stripped. PR body holds post content only. Push protection is on. |
+| Malicious upload (SVG with script, polyglot, huge file) | Magic-byte allowlist that must match the recorded type, type set from the sniff, `nosniff`, inline disposition, 10 MB cap, owner only |
+| Private data in the public repo | Drafts only in D1. Owner e-mail and App key are Worker secrets, and commits use the no-reply author. EXIF stripped in the browser, and the Worker refuses files with metadata. PR body holds post content only. `*.pem` and `*.key` are gitignored, and the App key is converted outside the repo. Push protection is on. |
 | Private data in logs | The Worker never logs draft bodies or image keys (Workers observability is on). `publish_error` holds status codes and run URLs only. `backup.yml` prints no content. |
-| Stolen App key | Can only open PRs on `blog/**` that touch `content/blog/` and pass `ci`. The worst case is unwanted blog content, reverted in git. Rotate the key in the App settings. |
-| Lost work | Rev check (409), conflict snapshot, `localStorage` copy, revisions, Time Travel, nightly export, `base_sha` check before publish |
+| Stolen App key | It can push `blog/**` branches, open and close PRs, create tags, and merge or auto-merge **any** PR whose `ci` is green, including a stranger's fork PR. The `ci.yml` guard fails its own PRs that touch code. The `deploy.yml` guard refuses to deploy a bot merge that touches code, and the owner reverts it. No immediate-merge fallback, so a missing `ci` rule stops publishing instead of merging. Rotate the key in the App settings. |
+| Lost work | Rev check (409), conflict snapshot, `localStorage` copy, revisions, Time Travel, nightly export, `base_sha` check before publish. Images of a downloaded `.md` are never deleted automatically. |
 | Test identity leaking into production | See §4.9.9 |
+| A compromised dependency in CI | Cloudflare token only on Wrangler steps, not during install or build. `pnpm` runs install scripts only for `esbuild` and `workerd` (`allowBuilds`). Backups use their own narrow credentials. |
 
 #### 4.9.9 Testing
 
 Tests sign their own tokens. Production auth has no switch to turn it off.
 
-- **Unit (Vitest, Node):** `verifyAccessJwt` with a generated key pair and a local key set: valid, wrong audience, wrong issuer, expired, HS256 confusion, wrong e-mail. `requireOwner`: wrong host, missing or foreign Origin, cross-site `Sec-Fetch-Site`, and `/ADMIN`, `/%61dmin`, `/admin.data`. A table-driven test walks every admin route and expects 404 without a token. Bridge golden tests: parse → doc → serialize is idempotent, the rendered HTML is the same before and after a round trip, typed syntax stays escaped, `16:9` and `10:30am` survive, bad figures fail. Upload sniffing (SVG and a renamed file are 415) and no `Exif` segment after re-encoding. D1 revision checks with fakes. The GitHub client against fetch fakes: the full publish sequence, slug collision, `base_sha` 409, the auto-merge fallback, token expiry. The frontmatter writer round-trips through `gray-matter` and `postFrontmatter`.
-- **E2E (Playwright against `vite preview`):** global setup makes a fresh key pair per run and writes only the public key (`ACCESS_TEST_JWKS`) to the gitignored `apps/web/.dev.vars`, then sends a signed token in `Cf-Access-Jwt-Assertion`. The Worker reads `ACCESS_TEST_JWKS` only when the host is `localhost` or `127.0.0.1`. If it is set on any other host, the gate logs an alert and refuses every admin request. GitHub is a local stub through a `GITHUB_API_BASE` override, which is honoured on localhost only. Local D1 and R2 come from Miniflare.
+- **Unit (Vitest, Node):** `verifyAccessJwt` with a generated key pair and a local key set: valid, wrong audience, wrong issuer, expired, HS256 confusion, wrong e-mail. `requireOwner`: wrong host, missing or foreign Origin, cross-site `Sec-Fetch-Site`, a missing header with a valid `CF_Authorization` cookie, and `/ADMIN`, `/API/ADMIN/me`, `/%61pi/admin/me`, `/admin.data` returning 404 even with a valid token. A table-driven test walks every admin route and expects 404 without a token. Bridge golden tests: parse → doc → serialize is idempotent, the rendered HTML is the same before and after a round trip, typed syntax stays escaped, `16:9` and `10:30am` survive, bad figures fail. Upload sniffing (SVG, a renamed file, and a type that differs from the row are 415), a raw phone JPEG with GPS is 415, the GIF key has no width suffix, and no `Exif` segment after re-encoding. D1 revision checks with fakes. The GitHub client against fetch fakes: the full publish sequence, slug collision, `base_sha` 409, an already-mergeable PR stopping without a merge, token expiry, and no request body containing `OWNER_EMAIL`. The frontmatter writer round-trips through `gray-matter` and `postFrontmatter`.
+- **E2E (Playwright against `vite preview`):** `pnpm e2e:keys` runs **before** `pnpm build` (in CI and in the local `pnpm e2e` server command), because the Vite plugin copies `.dev.vars` into the build output at build time and `vite preview` reads that copy. It writes only the public key (`ACCESS_TEST_JWKS`) to the gitignored `apps/web/.dev.vars`, and the private key to the gitignored `e2e/.auth/`. Wrangler drops `.dev.vars` keys that aren't declared once a `secrets` block exists, so `OWNER_EMAIL` is not declared in `secrets.required`; `deploy.yml` checks `wrangler secret list` for it instead, and the gate fails closed without it. Global setup signs a token and fails fast with a clear message if `/api/admin/me` doesn't accept it. Tests send it in `Cf-Access-Jwt-Assertion`. The Worker reads `ACCESS_TEST_JWKS` only when the host is `localhost` or `127.0.0.1`. If it is set on any other host, the gate logs an alert and refuses every admin request. GitHub is a local stub through a `GITHUB_API_BASE` override, which is honoured on localhost only. Local D1 and R2 come from Miniflare.
 - **Guards in CI:** a grep fails if `ACCESS_TEST_JWKS` or `GITHUB_API_BASE` appears in `wrangler.jsonc`. `deploy.yml` never writes `.dev.vars`, and `wrangler deploy` never uploads it. A fixture test seeds a draft and checks its text and image keys never appear in `posts.json`, the RSS feed, the sitemap, the search index or a PR body. A bundle check keeps TipTap out of public chunks.
 - **Production checks** after each auth change are in the hosting guide runbook (§5 and §6).
 
@@ -834,6 +852,7 @@ plus Cloudflare billing and usage notifications.
 - Editing snippets, photos or the resume in the browser (only blog posts get the editor)
 - Slug redirects after a rename (for example a `content/redirects.json` written in the same commit)
 - Truly private draft images (a WAF-blocked `drafts/` prefix, copied on publish)
+- Cover images: render `cover` on post cards and as the OG image, then add a cover picker to the editor
 - A faster publish path that skips CI (the App as a ruleset bypass actor)
 
 ---
@@ -850,10 +869,10 @@ Authoring (§4.9). Answer these at Step 10.0:
 
 6. **Sign-in method:** the Cloudflare login you already use (proposed, no Google Cloud setup), or direct Google login through Access?
 7. **Session length:** 24 hours (proposed) or up to 7 days?
-8. **`workers_dev: false`:** proposed. It removes the `<subdomain>.workers.dev` fallback URL. Keep it instead? The host check still blocks admin there.
+8. **`workers_dev: false` and `preview_urls: false`:** proposed. They remove the `<subdomain>.workers.dev` fallback URL and Preview URLs. Keep them instead? The host check still blocks admin there, and a Preview would need its own non-production `DB` and `PHOTOS` bindings.
 9. **Publish speed and exposure:** is about 4 minutes from Publish to live acceptable, with the text public on a GitHub PR from the moment you click? Or do you want the fast path from the start (the App pushes straight to `main`, about 1 minute, no CI first)?
 10. **Repo settings:** OK to change the live `main` ruleset to match hosting guide §2.4 (0 approvals, required `ci` check, Restrict updates off) and turn on auto-merge? Your own PRs would then merge without the admin bypass once `ci` passes.
 11. **Updated date:** show "Updated <date>" on posts edited after publishing (proposed: yes)?
 12. **Slugs:** lock a post's URL after the first publish (proposed), or add redirects later so slugs can change?
 13. **Draft images:** are unguessable URLs private enough, or do you want the WAF-blocked `drafts/` prefix (more code)?
-14. **Card on file:** Zero Trust asks for a payment method even on the Free plan (R2 already has one). Acceptable?
+14. **Card on file:** Zero Trust asks for a payment method even on the Free plan (R2 already has one). Zero Trust Free, Workers Free and D1 stop at their limits, but R2 bills anything over its free 10 GB and 1M/10M operations a month to that card. Acceptable, with a billing alert (hosting guide §2.8)?
