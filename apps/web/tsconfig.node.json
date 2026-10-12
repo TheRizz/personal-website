@@ -5,6 +5,7 @@
     "vitest.config.ts",
     "react-router.config.ts",
     "static-headers.ts",
+    "static-headers.test.ts",
     "worker/security-headers.ts"
   ],
   "compilerOptions": {

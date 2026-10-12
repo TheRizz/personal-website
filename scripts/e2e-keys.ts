@@ -10,24 +10,14 @@
  * Production never sees either file: deploy.yml doesn't run this, and `wrangler deploy` never
  * uploads `.dev.vars`.
  */
-import type { webcrypto } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import type { TestIdentity } from "../e2e/access";
 
 const root = new URL("../", import.meta.url);
 const identityFile = new URL("e2e/.auth/access-identity.json", root);
 const devVarsFile = new URL("apps/web/.dev.vars", root);
-
-/** Also read by e2e/access.ts, which signs the test tokens. */
-interface TestIdentity {
-  kid: string;
-  privateKey: webcrypto.JsonWebKey;
-  publicKey: webcrypto.JsonWebKey;
-  issuer: string;
-  audience: string;
-  email: string;
-}
 
 async function createIdentity(): Promise<TestIdentity> {
   const { privateKey, publicKey } = await crypto.subtle.generateKey(

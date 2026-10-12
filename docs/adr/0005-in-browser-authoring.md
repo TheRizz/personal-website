@@ -60,7 +60,7 @@ its main costs (about 4 minutes to publish, two stores) are stated and tested.
   - **Review checklist:** reads well, alt text and captions right, summary and tags right, nothing private, `ci` green, then **Squash and merge**.
 
   Republishing while the PR is open updates the body and adds a comment saying what changed since the last commit.
-- **Dates.** `date` is set at the first publish and never changes. Republishing a published post sets `updated` to the publish day, and the post page shows "Published <date> · Updated <date>" when they differ.
+- **Dates.** `date` is set at the first publish and never changes. Republishing a published post sets `updated` to the publish day, and the post page shows "<date> • Updated <date>" when they differ.
 - **Ship in two halves.** First the private editor with a "Download .md" button, so posts can be published through the normal PR flow. The GitHub App publish flow comes after.
 
 ## Consequences

@@ -69,6 +69,8 @@
     scrollbar-gutter: stable;
     scrollbar-width: thin;
     -webkit-text-size-adjust: 100%;
+    /* `cqw` is then the page width without the scrollbar gutter, unlike `vw` (figures below). */
+    container-type: inline-size;
   }
 
   body {
@@ -175,18 +177,20 @@
 
   /*
    * Image sections (::figure). `column` keeps to the text; `wide` and `full` break out of it,
-   * centred on the page. The `sizes` in packages/content-markdown/src/figure.ts match these widths.
+   * centred on the page. They are sized in `cqw` of the root, not `vw`: `vw` includes a classic
+   * scrollbar's gutter, which would push them off centre and past the edge. The `sizes` in
+   * packages/content-markdown/src/figure.ts match these widths.
    */
   .prose .figure {
     margin-block: 2.5rem;
   }
   .prose .figure--wide {
-    width: min(68.75rem, 100vw);
-    margin-inline: calc((100% - min(68.75rem, 100vw)) / 2);
+    width: min(68.75rem, 100cqw);
+    margin-inline: calc((100% - min(68.75rem, 100cqw)) / 2);
   }
   .prose .figure--full {
-    width: 100vw;
-    margin-inline: calc(50% - 50vw);
+    width: 100cqw;
+    margin-inline: calc(50% - 50cqw);
   }
   /* Edge to edge: no rounded corners or side borders (wide only once it fills the screen). */
   .prose .figure--full img {
@@ -203,10 +207,6 @@
   }
   .prose .figure--column figcaption {
     @apply px-0;
-  }
-  /* 100vw includes a classic scrollbar, so a breakout figure would scroll the page sideways. */
-  html:has(.prose .figure--wide, .prose .figure--full) {
-    overflow-x: clip;
   }
 
   /* Shiki emits both themes as CSS variables; pick one from the active theme. */

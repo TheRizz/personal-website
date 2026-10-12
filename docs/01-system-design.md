@@ -258,7 +258,7 @@ otherwise free-form, lowercase and kebab-case.
 | `/` | prerender | Intro, latest posts, featured snippets and photos |
 | `/resume` | prerender | Also `/resume.pdf` (generated in CI) |
 | `/blog`, `/blog/category/:category` | prerender | Paginated and filterable by tag on the client |
-| `/blog/:slug` | prerender | Shiki-highlighted code, reading time, tags, prev/next. Shows "Published <date> · Updated <date>", the second part only when `updated` differs from `date`. |
+| `/blog/:slug` | prerender | Shiki-highlighted code, reading time, tags, prev/next. Shows "<date> • Updated <date>" (e.g. "October 11, 2026 • Updated November 2, 2026"), the second part only when `updated` differs from `date`. |
 | `/snippets`, `/snippets/:slug` | prerender | Copy button, language filter |
 | `/photos`, `/photos/album/:album` | prerender | Masonry grid and lightbox. Uses `srcset` from R2 variants. |
 | `/tags`, `/tags/:tag` | prerender | Mixed list grouped by content type |
@@ -444,11 +444,12 @@ protocol (including hibernation) and two players in separate browser contexts.
 
 ### 4.8 Security
 
-- Security headers, set with a `_headers` file and the Worker: `Content-Security-Policy` (`default-src 'self'; img-src 'self' https://photos.<domain> data:; connect-src 'self' wss://<domain>; …`), `Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`.
+- Security headers on every response, from the Worker and from a generated `_headers` file for static assets, both built from `worker/security-headers.ts`: `Content-Security-Policy`, `Strict-Transport-Security: max-age=31536000`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin` and `Permissions-Policy`. The CSP is `default-src 'self'`; `script-src 'self'`, the page's own inline scripts (below) and `https://static.cloudflareinsights.com`; `style-src 'self' 'unsafe-inline'` (Shiki and React write inline styles); `img-src 'self' https://photos.ry-mart.com data:`; `font-src 'self' data:`; `connect-src 'self' wss://ry-mart.com https://cloudflareinsights.com`; `object-src 'none'`; `base-uri 'none'`; `form-action 'self'`; `frame-ancestors 'none'`. The two `cloudflareinsights.com` origins are Cloudflare Web Analytics, whose beacon is injected at the edge.
 - Markdown is rendered at build time from trusted content, but `rehype-sanitize` is still applied in case content is ever pasted in from elsewhere.
 - The Cloudflare API token used by CI is scoped to the minimum (Workers Scripts:Edit, Workers R2 Storage:Edit, Account Settings:Read, and D1:Edit once the authoring migrations exist) and stored in the `main` GitHub Environment, which only the `main` branch can deploy from (a required reviewer can be added). It is set only on the Wrangler steps (migrations, deploy, rollback), never on the job, so `pnpm install` and `pnpm build` run without it. The nightly backup has its own narrower credentials (hosting guide §2.9).
 - Dependabot and `pnpm audit` run in CI. GitHub secret scanning and push protection are on.
-- The site-wide CSP above isn't shipped yet (there is no `_headers` file). It ships with Step 10.1, before any owner session can exist, because XSS anywhere on `ry-mart.com` could make same-origin admin calls while the owner is signed in. `img-src` must include `https://photos.ry-mart.com`.
+- **Inline scripts** (built in Step 10.1, before any owner session can exist, because XSS anywhere on `ry-mart.com` could make same-origin admin calls while the owner is signed in). No policy allows `'unsafe-inline'` scripts. A prerendered page can't carry a per-request nonce, and React Router inlines each page's loader data, so the build (`buildEnd` in `react-router.config.ts`, `static-headers.ts`) writes `_headers` with one `/*` rule for every static asset and one rule per prerendered page that replaces the CSP with one listing that page's inline scripts by sha256 hash. Pages the Worker renders (the 404 page, live games, admin) get a fresh nonce per response, plus the theme script's hash. `zod` runs `jitless` in `game-core`, because its JIT probes `new Function`, which the CSP blocks. `pnpm dev` sends no CSP (Vite's HMR scripts carry no nonce) and renders no nonce.
+- **The `_headers` rule cap.** Workers Static Assets allows at most 100 `_headers` rules, and there is one per prerendered page, so with 8 static routes plus one per post the build fails at about 92 posts, sooner once tag, category, snippet and album pages are prerendered. The build warns above 80 rules. The planned fallback, before the cap: inject each page's policy at prerender time as a `<meta http-equiv="Content-Security-Policy">` that carries `script-src` with its hashes, and keep a single hash-free header policy in the `/*` rule with `frame-ancestors`, `object-src`, `base-uri` and the rest, but no `script-src` or `default-src` that would block inline scripts (both policies are enforced, and a meta CSP can't carry `frame-ancestors`). The alternative is to make the theme and hydration bootstrap external scripts, so every static page shares one policy.
 - The admin area has its own stricter rules. §4.9.8 lists them.
 
 ### 4.9 Authoring (owner only)
@@ -502,6 +503,12 @@ opts in on its own.
 4. **Token.** Read only the `Cf-Access-Jwt-Assertion` header. On `ry-mart.com` a missing header means Access wasn't in front, so it is a 404 and a log line (never the token). There is no cookie fallback. Verify with `jose`: RS256 only, issuer = team domain, audience = the app's AUD tag, `maxTokenAge` = the session length, keys from `<team>/cdn-cgi/access/certs` (fetched once per isolate, matched by `kid`). Then require `type === "app"` and `email` equal to the `OWNER_EMAIL` secret, ignoring case. Any failure is a 404. A missing `OWNER_EMAIL` fails closed. A failed key fetch is a 503.
 5. **Writes** (POST, PUT, PATCH, DELETE). Require `Origin: https://ry-mart.com`, `Sec-Fetch-Site: same-origin` when the header is present, `Content-Type: application/json` (`image/*` on uploads) and `X-Admin: 1`. A cross-site request then needs a preflight, and Access answers the cookie-less `OPTIONS` with 403. Admin routes never send CORS headers.
 6. **Every admin response** gets `Cache-Control: no-store, private`, `X-Robots-Tag: noindex`, `X-Frame-Options: DENY` and `frame-ancestors 'none'`. `robots.txt` gets `Disallow: /admin`.
+
+Every refusal is a bare 404: JSON under `/api`, plain text for pages, with the
+admin headers and CSP. It never says which check failed. It isn't the site's
+HTML 404, so it does show which paths are gated; that is accepted, because the
+admin route names are public in the repo and Access answers `/admin` with its
+login anyway.
 
 `run_worker_first` becomes `["/api/*", "/admin", "/admin/*"]`, and `/admin` is
 never in the prerender list. Admin routes have no server loader or action that

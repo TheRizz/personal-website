@@ -1,9 +1,11 @@
+import type { webcrypto } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 
-/** The e2e test identity written by `pnpm e2e:keys` (scripts/e2e-keys.ts). */
-interface TestIdentity {
+/** The e2e test identity written by `pnpm e2e:keys` (scripts/e2e-keys.ts, which imports this). */
+export interface TestIdentity {
   kid: string;
-  privateKey: JsonWebKey;
+  privateKey: webcrypto.JsonWebKey;
+  publicKey: webcrypto.JsonWebKey;
   issuer: string;
   audience: string;
   email: string;

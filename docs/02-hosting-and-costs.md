@@ -64,7 +64,7 @@ check you can run to confirm it worked.
 3. ✅ Check: the domain shows as **Active** in the dashboard.
 
 ### 2.2 Workers and R2
-1. **Workers & Pages**: find **Your subdomain** (`<name>.workers.dev`) and select **Change** if you want a different name. This is the fallback URL. If no subdomain appears yet, one is set up when you create your first Worker or the first time you run `wrangler deploy`. This step doesn't block anything else, since the site is served from your own domain.
+1. **Workers & Pages**: find **Your subdomain** (`<name>.workers.dev`) and select **Change** if you want a different name. The site doesn't use it: `workers_dev` and `preview_urls` are `false` for this Worker (design doc §8 Q8), so it is not a fallback URL and nothing is served there. If no subdomain appears yet, one is set up when you create your first Worker or the first time you run `wrangler deploy`. This step doesn't block anything else, since the site is served from your own domain.
 2. **R2 → Enable R2**. Add a payment method if asked; usage under 10 GB is not billed.
 3. Create a bucket named `photos`. Under **Settings → Custom Domains**, attach `photos.<yourdomain>`.
 4. ✅ Check: upload a test image in the dashboard and open `https://photos.<yourdomain>/test.jpg`.
@@ -112,7 +112,7 @@ check you can run to confirm it worked.
 - **Email Routing:** forward `hello@<yourdomain>` to your personal inbox.
 - **Web Analytics:** turn it on for the zone. It's cookieless, so you don't need a cookie banner.
 - **Notifications:** turn on "Usage-based billing" and "Workers weekly summary" e-mails, so you hear early if you're getting close to the free limits.
-- **Security → Settings:** "Always Use HTTPS" on, minimum TLS 1.2, HSTS on once everything works.
+- **Security → Settings:** "Always Use HTTPS" on, minimum TLS 1.2. The Worker and the `_headers` file already send `Strict-Transport-Security: max-age=31536000` (since Step 10.1), so leave the dashboard HSTS setting off; Step 9.4 only decides whether to add `includeSubDomains` and `preload`.
 
 ### 2.7 Cloudflare Access for the admin (Step 10.0)
 1. **Zero Trust** (left menu of dash.cloudflare.com): pick a team name, for example `rymart`, which gives `https://rymart.cloudflareaccess.com`. Choose the **Free** plan and enter payment details. You won't be charged.

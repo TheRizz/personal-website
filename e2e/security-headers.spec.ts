@@ -1,44 +1,13 @@
-import { createHash } from "node:crypto";
-import { test as base, expect, type APIResponse, type Page } from "@playwright/test";
+import { expect, type APIResponse } from "@playwright/test";
+import { cspTest, inlineScripts, sha256 } from "./csp";
 import { createLobby, uniqueIp } from "./helpers";
 
 // The site-wide CSP and security headers (design doc §4.8). Prerendered pages get theirs from the
 // generated `_headers` file (script hashes); pages the Worker renders get a per-request nonce.
 
-declare global {
-  interface Window {
-    cspViolations?: string[];
-  }
-}
-
 const TOP_LEVEL_ROUTES = ["/", "/blog", "/resume", "/snippets", "/photos", "/search", "/games"];
 
-/**
- * A page that records every CSP violation (console message or `securitypolicyviolation` event)
- * and every uncaught error; the test fails if there are any.
- */
-const test = base.extend<{ page: Page }>({
-  page: async ({ browser }, use) => {
-    const context = await browser.newContext({
-      extraHTTPHeaders: { "CF-Connecting-IP": uniqueIp() },
-    });
-    const page = await context.newPage();
-    const problems: string[] = [];
-    page.on("console", (message) => {
-      if (/Content.Security.Policy/i.test(message.text())) problems.push(message.text());
-    });
-    page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
-    await page.addInitScript(() => {
-      document.addEventListener("securitypolicyviolation", (event) => {
-        (window.cspViolations ??= []).push(`${event.violatedDirective} ${event.blockedURI}`);
-      });
-    });
-    await use(page);
-    problems.push(...(await page.evaluate(() => window.cspViolations ?? [])));
-    await context.close();
-    expect(problems).toEqual([]);
-  },
-});
+const test = cspTest({ headers: () => ({ "CF-Connecting-IP": uniqueIp() }) });
 
 const SECURITY_HEADERS = {
   "strict-transport-security": "max-age=31536000",
@@ -64,15 +33,6 @@ async function scriptSources(response: APIResponse | null): Promise<string[]> {
   const scriptSrc = policy.split(";").find((d) => d.trim().startsWith("script-src"));
   return scriptSrc!.trim().split(/\s+/).slice(1);
 }
-
-/** The text of every inline (non-src) script in an HTML document. */
-function inlineScripts(html: string): { attributes: string; text: string }[] {
-  return [...html.matchAll(/<script\b(?![^>]*\ssrc=)([^>]*)>([\s\S]*?)<\/script>/gi)].map(
-    ([, attributes = "", text = ""]) => ({ attributes, text }),
-  );
-}
-
-const sha256 = (text: string) => `'sha256-${createHash("sha256").update(text).digest("base64")}'`;
 
 test("every top-level route and a blog post load with no CSP violations", async ({ page }) => {
   for (const path of TOP_LEVEL_ROUTES) {

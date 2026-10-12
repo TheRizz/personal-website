@@ -16,7 +16,7 @@ export { GameLobby } from "./game-lobby";
 declare module "react-router" {
   export interface AppLoadContext {
     cloudflare: { env: Env; ctx: ExecutionContext };
-    /** CSP nonce for this render's inline scripts. Absent while prerendering. */
+    /** CSP nonce for this render's inline scripts. Absent while prerendering and in dev. */
     cspNonce?: string;
   }
 }
@@ -76,7 +76,9 @@ async function route(request: Request, env: Env, renderPage: () => Promise<Respo
 export default {
   async fetch(request, env, ctx) {
     const nonce = createNonce();
-    const renderPage = () => requestHandler(request, { cloudflare: { env, ctx }, cspNonce: nonce });
+    // Dev sends no CSP (see withSecurityHeaders), so a nonce there would only break hydration.
+    const cspNonce = import.meta.env.DEV ? undefined : nonce;
+    const renderPage = () => requestHandler(request, { cloudflare: { env, ctx }, cspNonce });
 
     // The owner gate runs before anything else, so no admin path can be reached around it.
     const owner = await requireOwner(request, env);

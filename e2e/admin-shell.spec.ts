@@ -1,50 +1,18 @@
 import { existsSync, readFileSync } from "node:fs";
-import { createHash } from "node:crypto";
-import { test as base, expect, type Page } from "@playwright/test";
+import { expect } from "@playwright/test";
 import { ASSERTION_HEADER, signAccessToken, testIdentity } from "./access";
+import { cspTest, inlineScripts, sha256 } from "./csp";
 
 // The admin shell (design doc §4.9.2, Step 10.3), signed in with the localhost-only test identity
 // standing in for Cloudflare Access.
 
-declare global {
-  interface Window {
-    cspViolations?: string[];
-  }
-}
-
-/**
- * A page signed in as the owner (every request carries the test token, as Access would add it)
- * that fails the test on any CSP violation, console error or uncaught exception.
- */
-const test = base.extend<{ page: Page }>({
-  page: async ({ browser }, use) => {
-    const context = await browser.newContext({
-      extraHTTPHeaders: { [ASSERTION_HEADER]: await signAccessToken() },
-    });
-    const page = await context.newPage();
-    const problems: string[] = [];
-    page.on("console", (message) => {
-      const text = message.text();
-      // The browser's own line for a non-2xx response; the tests check those statuses themselves.
-      if (text.startsWith("Failed to load resource:")) return;
-      if (message.type() === "error" || /Content.Security.Policy/i.test(text)) problems.push(text);
-    });
-    page.on("pageerror", (error) => problems.push(`pageerror: ${error.message}`));
-    await page.addInitScript(() => {
-      document.addEventListener("securitypolicyviolation", (event) => {
-        (window.cspViolations ??= []).push(`${event.violatedDirective} ${event.blockedURI}`);
-      });
-    });
-    await use(page);
-    problems.push(...(await page.evaluate(() => window.cspViolations ?? [])));
-    await context.close();
-    expect(problems).toEqual([]);
-  },
+/** A page signed in as the owner: every request carries the test token, as Access would add it. */
+const test = cspTest({
+  headers: async () => ({ [ASSERTION_HEADER]: await signAccessToken() }),
+  consoleErrors: true,
 });
 
-const sha256 = (text: string) => `'sha256-${createHash("sha256").update(text).digest("base64")}'`;
-
-test("without a token /admin is a plain 404 that reveals nothing", async ({ request }) => {
+test("without a token /admin is a bare plain-text 404", async ({ request }) => {
   for (const path of ["/admin", "/admin/", "/admin/drafts/example"]) {
     const response = await request.get(path);
     expect(response.status(), path).toBe(404);
@@ -97,9 +65,9 @@ test("the admin page has one strict CSP with a fresh nonce", async ({ page }) =>
   const nonce = nonces[0]!.slice("'nonce-".length, -1);
   // Every inline script carries the nonce, except the theme script, which is allowed by hash.
   const html = await response!.text();
-  const scripts = [...html.matchAll(/<script\b(?![^>]*\ssrc=)([^>]*)>([\s\S]*?)<\/script>/gi)];
+  const scripts = inlineScripts(html);
   expect(scripts.length).toBeGreaterThan(0);
-  for (const [, attributes = "", text = ""] of scripts) {
+  for (const { attributes, text } of scripts) {
     if (!attributes.includes(`nonce="${nonce}"`)) expect(sources).toContain(sha256(text));
   }
   const again = await page.request.get("/admin");

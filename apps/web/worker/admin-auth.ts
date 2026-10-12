@@ -9,7 +9,9 @@ import {
 import { SITE_ORIGIN } from "./security-headers";
 
 // The owner gate (design doc §4.9.1, ADR-0004). It runs first for every request that reaches the
-// Worker. Every refusal is a 404, so nothing confirms that an admin route exists.
+// Worker. Every refusal is a bare 404, so no refusal says which check failed. It is not the site's
+// HTML 404, so a gated path can be told from an unknown one; that is fine, because the admin
+// routes are public in the repo and Access answers /admin anyway (ADR-0004).
 
 /** The Access session duration (hosting guide §2.7). Older tokens are refused. */
 const MAX_TOKEN_AGE = "24h";
@@ -196,7 +198,10 @@ export function withAdminHeaders(response: Response): Response {
   return result;
 }
 
-/** The same 404 an unknown route gives: JSON under /api, plain text for pages. */
+/**
+ * A bare 404: JSON under /api, plain text for pages. It differs from the site's HTML 404, which is
+ * fine because the admin routes are public in the repo and Access answers /admin anyway.
+ */
 function notFound(isApi: boolean): Response {
   return withAdminHeaders(
     isApi

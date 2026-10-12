@@ -292,7 +292,7 @@ from the nav yet.
 
 ### Step 9.4: Launch
 - [ ] Work through the go-live checklist (hosting guide §5), except the Authoring block, which Step 10.11 covers.
-- [ ] Turn on HSTS. Submit the sitemap to Google Search Console and Bing Webmaster Tools (both free).
+- [ ] HSTS: the site already sends `Strict-Transport-Security: max-age=31536000` (Step 10.1). Decide on `includeSubDomains` and `preload`, and submit to the preload list only once every subdomain serves HTTPS. Submit the sitemap to Google Search Console and Bing Webmaster Tools (both free).
 - [ ] Replace the seed content with real posts, snippets, photos and resume.
 
 **Done when:** every checklist box outside the Authoring block is ticked.
@@ -314,6 +314,22 @@ token. Steps 10.0–10.6 give a working private editor; posts are published by
 committing the downloaded `.md` through a normal PR. Steps 10.7–10.11 add
 one-click publishing.
 
+> **Built 2026-10-12 (Steps 10.1–10.3, code only).** The production Done-whens stay open until
+> Step 10.0 is finished: the Access vars in `wrangler.jsonc` are empty until the owner sends the
+> team domain and AUD tag, so admin fails closed in production. Deviations from the plan:
+> prerendered pages get their CSP from a `_headers` file generated in `buildEnd`, one rule per
+> page listing that page's inline scripts by sha256 hash; Worker-rendered pages get a per-request
+> nonce. The policy also allows Cloudflare Web Analytics (`static.cloudflareinsights.com`,
+> `cloudflareinsights.com`), and `zod` runs `jitless` because its JIT trips the CSP.
+> `_headers` is capped at 100 rules, one per prerendered page, so the build warns above 80 and
+> fails at about 92 posts; the fallback is in design doc §4.8. HSTS (`max-age=31536000`) is
+> sent from this step, so Step 9.4 only decides on `includeSubDomains` and `preload`. Admin
+> paths get their own stricter CSP instead of the site-wide one (§4.9.8). Gate refusals are a
+> bare 404 (plain text for pages), not the site's HTML 404 (§4.9.1). E2E needs `pnpm e2e:keys`
+> before `pnpm build`. The post page shows "<date> • Updated <date>", which ships here with
+> Step 10.2 rather than with Step 10.9. Wide and full figures are sized in `cqw` of the root,
+> not `vw`, so a classic scrollbar doesn't push them off centre.
+
 ### Step 10.0: Owner setup, part 1 (no code)
 - [x] Answer §8 Q6–14 and set ADR-0004 and ADR-0005 to *Accepted* (2026-10-12). ADR-0005 is amended: the owner merges every publish PR by hand.
 - [x] A card on file and the R2 billing alert (§2.8 step 5).
@@ -327,27 +343,27 @@ one-click publishing.
 **Done when:** every ✅ check in hosting guide §2.7–2.9 passes, `curl -sI https://ry-mart.com/admin` returns `302` to `<team>.cloudflareaccess.com`, and the team domain, AUD tag and D1 id have been sent back.
 
 ### Step 10.1: Owner gate in the Worker
-- [ ] Site-wide CSP and security headers from §4.8 (`img-src` includes `photos.ry-mart.com`), so they are live before any owner session can exist. Check the game WebSocket still works.
-- [ ] `pnpm add jose` (exact version) in `apps/web`. `worker/admin-auth.ts`: `verifyAccessJwt` as a pure function (with `maxTokenAge`), and `requireOwner` with admin detection, a 404 for any non-canonical spelling, host check, header-only token (no cookie fallback), CSRF rules, no-store and noindex headers (§4.9.1).
-- [ ] Call it first in `worker/index.ts`, before `/api/*` dispatch and the React Router handler. Mount an admin router behind it.
-- [ ] `GET /api/admin/me` (sets `owner_hint`). Requests to the API are refused with 404 everywhere else under `/api/admin`.
-- [ ] `wrangler.jsonc`: Access vars, `run_worker_first` adds `/admin` and `/admin/*`, `workers_dev: false`, `preview_urls: false`. No `secrets.required` block (it would hide the e2e key); `deploy.yml` checks `wrangler secret list` for `OWNER_EMAIL` instead. `robots.txt` adds `Disallow: /admin`.
-- [ ] `deploy.yml`: `CLOUDFLARE_API_TOKEN` only on the Wrangler steps, not the job.
-- [ ] Test identity: `pnpm e2e:keys` runs before `pnpm build` in CI and in the local `pnpm e2e` server command. It writes `ACCESS_TEST_JWKS` (public key only) to `.dev.vars` and the private key to the gitignored `e2e/.auth/`. Global setup signs tokens and fails fast if the build doesn't accept them. The Worker honours the key on localhost only and fails closed if it sees it on any other host. CI grep guard on `wrangler.jsonc`.
-- [ ] Never log tokens, draft bodies or image keys.
+- [x] Site-wide CSP and security headers from §4.8 (`img-src` includes `photos.ry-mart.com`), so they are live before any owner session can exist. Check the game WebSocket still works.
+- [x] `pnpm add jose` (exact version) in `apps/web`. `worker/admin-auth.ts`: `verifyAccessJwt` as a pure function (with `maxTokenAge`), and `requireOwner` with admin detection, a 404 for any non-canonical spelling, host check, header-only token (no cookie fallback), CSRF rules, no-store and noindex headers (§4.9.1).
+- [x] Call it first in `worker/index.ts`, before `/api/*` dispatch and the React Router handler. Mount an admin router behind it.
+- [x] `GET /api/admin/me` (sets `owner_hint`). Requests to the API are refused with 404 everywhere else under `/api/admin`.
+- [x] `wrangler.jsonc`: Access vars, `run_worker_first` adds `/admin` and `/admin/*`, `workers_dev: false`, `preview_urls: false`. No `secrets.required` block (it would hide the e2e key); `deploy.yml` checks `wrangler secret list` for `OWNER_EMAIL` instead. `robots.txt` adds `Disallow: /admin`.
+- [x] `deploy.yml`: `CLOUDFLARE_API_TOKEN` only on the Wrangler steps, not the job.
+- [x] Test identity: `pnpm e2e:keys` runs before `pnpm build` in CI and in the local `pnpm e2e` server command. It writes `ACCESS_TEST_JWKS` (public key only) to `.dev.vars` and the private key to the gitignored `e2e/.auth/`. Global setup signs tokens and fails fast if the build doesn't accept them. The Worker honours the key on localhost only and fails closed if it sees it on any other host. CI grep guard on `wrangler.jsonc`.
+- [x] Never log tokens, draft bodies or image keys.
 
 **Done when:** Vitest covers valid, wrong audience, wrong issuer, too old, expired, HS256, wrong e-mail, wrong host, missing Origin, cross-site `Sec-Fetch-Site`, a valid `CF_Authorization` cookie with no header (404), and `/ADMIN`, `/%61dmin` and `/admin.data`. A table-driven test expects 404 without a token on every admin route, and a check fails if any admin route or the root route exports a server `loader` or `action`. E2E gets 404 anonymously and `200 {email}` with the test token on `/api/admin/me`, and 404 **with** the test token on `/API/ADMIN/me`, `/%61pi/admin/me` and `/ADMIN/`. After deploy, the runbook checks pass: anonymous gets the Access redirect, the logged-in browser sees its e-mail, a cross-site POST is refused, securityheaders.com shows the CSP and the games still work.
 
 ### Step 10.2: Shared Markdown package and figures in the build ⇄
-- [ ] `packages/content-markdown`: `remarkLeafDirective` (leaf only), `remarkFigure` (validation, variant widths from `w`, `srcset`, `sizes`, size classes), `sanitizeSchema`, `renderMarkdown(md, {highlighter})`, `markdownToDoc` / `docToMarkdown`, `SHIKI_LANGS` (§4.9.4).
-- [ ] Switch `scripts/build-content.ts` to it. Figure CSS for column, wide and full.
-- [ ] `build-content --check-images` in CI: HEAD each figure URL, only when files under `content/blog/` change, and only for posts that have figures, so unrelated PRs never depend on `photos.ry-mart.com`.
+- [x] `packages/content-markdown`: `remarkLeafDirective` (leaf only), `remarkFigure` (validation, variant widths from `w`, `srcset`, `sizes`, size classes), `sanitizeSchema`, `renderMarkdown(md, {highlighter})`, `markdownToDoc` / `docToMarkdown`, `SHIKI_LANGS` (§4.9.4).
+- [x] Switch `scripts/build-content.ts` to it. Figure CSS for column, wide and full.
+- [x] `build-content --check-images` in CI: HEAD each figure URL, only when files under `content/blog/` change, and only for posts that have figures, so unrelated PRs never depend on `photos.ry-mart.com`.
 
 **Done when:** every existing post renders byte-identical HTML to before. Golden tests pass: round trip is idempotent, rendered HTML is the same after a round trip, typed syntax stays escaped, `16:9` and `10:30am` are untouched, a bad `src`, missing `alt`, missing `w`/`h` or unknown `size` fails the build with file and line. A test post with a wide figure renders `figure`, `img[srcset]` and `figcaption`.
 
 ### Step 10.3: Admin shell
-- [ ] `/admin` layout route: client data only, CSP with a per-request nonce, `frame-ancestors 'none'`, a "Sign out" link that also clears `owner_hint`, and an empty draft list. Never in the prerender list.
-- [ ] The `fetch` wrapper for `/api/admin/*`: adds `X-Requested-With: XMLHttpRequest` (Access answers 401, not a redirect) and `X-Admin: 1` (the gate needs it on writes), and shows "Session expired" on 401.
+- [x] `/admin` layout route: client data only, CSP with a per-request nonce, `frame-ancestors 'none'`, a "Sign out" link that also clears `owner_hint`, and an empty draft list. Never in the prerender list.
+- [x] The `fetch` wrapper for `/api/admin/*`: adds `X-Requested-With: XMLHttpRequest` (Access answers 401, not a redirect) and `X-Admin: 1` (the gate needs it on writes), and shows "Session expired" on 401.
 
 **Done when:** e2e signs in with the test token and sees the empty draft list. A test write through the wrapper passes the gate, and the same write without the wrapper gets 404. The prerendered post HTML is unchanged. axe shows no new violations.
 
@@ -397,7 +413,7 @@ one-click publishing.
 - [ ] Frontmatter writer (`JSON.stringify` per value), slug generator, path allowlist, uniqueness check against `main` and open `blog/*` PRs, and the check that every figure key is `ready`.
 - [ ] `POST …/publish`: one commit (author from the plain var `GIT_AUTHOR`, the owner's no-reply address), branch and PR. The Worker never merges and never turns on auto-merge; the owner merges (§4.9.7). Publishing again while the PR is open adds a commit to the same branch, refreshes the body and comments with what changed.
 - [ ] PR title and body (§4.9.7): `Publish:`, `Update:` or `Unpublish: <title>`; an overview (URL, summary, tags, reading time, created and updated dates); the figures inline from `photos.ry-mart.com` with their alt text; "What changed" (frontmatter old → new and a section-level body summary for an update); a short review checklist.
-- [ ] Dates: republishing a published post sets `updated` to the publish day and never changes `date`. `blog.$slug` shows "Published <date> · Updated <date>", the second part only when they differ.
+- [ ] Dates: republishing a published post sets `updated` to the publish day and never changes `date`. The display half shipped with Step 10.2: `blog.$slug` already shows "<date> • Updated <date>", the second part only when they differ.
 - [ ] Confirm dialog with the exposure and timing warning.
 - [ ] `GET /api/admin/posts` (one GraphQL tree query, cached by tree SHA) and Edit-from-`main` import with the `base_sha` check.
 - [ ] On `blog.$slug`, a client-only probe behind `owner_hint` that shows "Edit" linking to `/admin/posts/<slug>` with a full page load. It ships here because that route needs the import above.
