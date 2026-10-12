@@ -1,4 +1,4 @@
-import { RefreshCw } from "lucide-react";
+import { Eye, RefreshCw } from "lucide-react";
 import { MAX_RECONNECT_ATTEMPTS, type ConnectionStatus } from "~/lib/games/client-state";
 import { primaryButton } from "./ui";
 
@@ -62,7 +62,9 @@ export function ConnectionNotice({
           {replaced ? "This game is open in another tab." : "Connection lost."}
         </span>{" "}
         <span className="text-muted">
-          {replaced ? "Only one tab can hold your seat." : "Check your connection, then try again."}
+          {replaced
+            ? "Your seat moved there. Keep playing in that tab, or watch from this one."
+            : "Check your connection, then try again."}
         </span>
       </p>
       <button
@@ -70,8 +72,8 @@ export function ConnectionNotice({
         onClick={onReconnect}
         className={`${primaryButton} min-h-10 shrink-0 px-4 text-sm`}
       >
-        <RefreshCw aria-hidden="true" />
-        {replaced ? "Play here" : "Reconnect"}
+        {replaced ? <Eye aria-hidden="true" /> : <RefreshCw aria-hidden="true" />}
+        {replaced ? "Watch here" : "Reconnect"}
       </button>
     </div>
   );

@@ -1,6 +1,7 @@
 import { serverMsgSchema, type ClientMsg } from "@site/game-core";
 import type { LobbyLookup } from "./api";
 import {
+  classifyClose,
   clientReducer,
   initialClientState,
   PING_INTERVAL_MS,
@@ -109,7 +110,10 @@ export class GameClient {
     this.dispatch({ type: "left" });
   };
 
-  /** Manual reconnect (after "failed" or "replaced"): checks the lobby, then connects afresh. */
+  /**
+   * Manual reconnect: checks the lobby, then connects afresh. After "replaced" the token is gone,
+   * so this tab comes back as a spectator (or takes a seat that has since been freed).
+   */
   reconnect = () => {
     if (!this.running) return;
     this.run += 1;
@@ -188,6 +192,8 @@ export class GameClient {
       clearInterval(this.pingTimer);
       clearTimeout(this.stableTimer);
       this.socket = null;
+      // The tab that took the seat over got a fresh token; this tab's copy no longer works.
+      if (classifyClose(event.code) === "replaced") this.deps.saveToken(null);
       this.handleClose(event.code);
     };
   }

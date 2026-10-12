@@ -235,6 +235,22 @@ describe("GameClient", () => {
     }
   });
 
+  it("forgets the token after another tab takes the seat (4000) and rejoins without it", async () => {
+    const { client, sockets, last, stored } = setup({ token: TOKEN });
+    client.start();
+    last().open();
+    last().receive({ t: "joined", role: "O", token: NEW_TOKEN });
+    last().drop(4000);
+    expect(client.getSnapshot().connection).toBe("replaced");
+    expect(stored()).toBeNull();
+
+    client.reconnect();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sockets).toHaveLength(2);
+    last().open();
+    expect(last().messages).toEqual([{ t: "join", name: "Ada" }]);
+  });
+
   it("is safe to stop and start again (React StrictMode)", async () => {
     const { client, sockets } = setup();
     client.start();
