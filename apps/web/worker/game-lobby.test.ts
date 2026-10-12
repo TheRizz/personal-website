@@ -1,7 +1,10 @@
 import {
+  CLOSE_CODES,
   LOBBY_IDLE_TTL_MS,
   MAX_SOCKETS_PER_LOBBY,
+  MAX_SPECTATORS_PER_LOBBY,
   RECONNECT_GRACE_MS,
+  SEATS,
   serverMsgSchema,
   type LobbyRecord,
   type ServerMsg,
@@ -11,6 +14,8 @@ import { GameLobby } from "./game-lobby";
 
 /** The parts of a hibernatable server-side WebSocket the DO uses. */
 class FakeSocket {
+  /** OPEN until the server closes it; then CLOSING, as long as the client doesn't answer. */
+  readyState = 1;
   attachment: unknown = null;
   sent: string[] = [];
   closed: { code: number; reason: string } | null = null;
@@ -31,6 +36,7 @@ class FakeSocket {
   close(code: number, reason: string) {
     if (this.broken || this.closed) throw new Error("socket closed");
     this.closed = { code, reason };
+    this.readyState = 2;
   }
   /** Server messages received since the last call, validated against the protocol. */
   take(): ServerMsg[] {
@@ -183,6 +189,7 @@ describe("GameLobby /init and /info", () => {
       game: "tictactoe",
       phase: "waiting",
       seatsTaken: 0,
+      connectedSeats: 0,
       spectators: 0,
     });
   });
@@ -225,11 +232,14 @@ describe("GameLobby /ws", () => {
     expect((await t.lobby.fetch(new Request("https://lobby/ws"))).status).toBe(426);
   });
 
-  it(`refuses socket ${MAX_SOCKETS_PER_LOBBY + 1} with 409 LOBBY_FULL until one closes`, async () => {
+  // One spare socket per seat on top of the cap, so a returning player always gets in.
+  const SOCKET_LIMIT = MAX_SOCKETS_PER_LOBBY + SEATS.length;
+
+  it(`refuses socket ${SOCKET_LIMIT + 1} with 409 LOBBY_FULL until one closes`, async () => {
     const t = setup();
     await init(t.lobby);
     const sockets = [];
-    for (let i = 0; i < MAX_SOCKETS_PER_LOBBY; i++) sockets.push(await connect(t));
+    for (let i = 0; i < SOCKET_LIMIT; i++) sockets.push(await connect(t));
     const full = await t.lobby.fetch(upgradeRequest());
     expect(full.status).toBe(409);
     expect(await full.json()).toMatchObject({ error: { code: "LOBBY_FULL" } });
@@ -237,6 +247,34 @@ describe("GameLobby /ws", () => {
     // A socket that is closing (still listed by the runtime) no longer counts.
     await t.lobby.webSocketClose(ws(sockets[0]!));
     await connect(t);
+  });
+
+  it("refuses an extra spectator but lets a dropped player reclaim the seat", async () => {
+    const t = setup();
+    await init(t.lobby);
+    const x = await join(t, "Xena");
+    const token = x.take().find((m) => m.t === "joined")?.token ?? undefined;
+    const o = await join(t, "Oscar");
+    for (let i = 0; i < MAX_SPECTATORS_PER_LOBBY; i++) await join(t, `Fan ${i}`);
+    await t.lobby.webSocketClose(ws(x));
+    t.forget(x);
+    o.take();
+
+    // A newcomer's socket takes X's old slot before X is back...
+    const lurker = await connect(t);
+    // ...but X can still connect and reclaim the seat.
+    const back = await join(t, "Xena", token);
+    expect(back.take()[0]).toMatchObject({ t: "joined", role: "X" });
+    expect(states(o.take())[0]?.state).toMatchObject({
+      players: { X: { connected: true } },
+      spectators: MAX_SPECTATORS_PER_LOBBY,
+    });
+
+    // The newcomer would be spectator number 9: refused and closed.
+    await send(t, lurker, { t: "join", name: "Lurker" });
+    expect(lurker.take()).toMatchObject([{ t: "error", code: "LOBBY_FULL" }]);
+    expect(lurker.closed).toEqual({ code: CLOSE_CODES.lobbyFull, reason: "Lobby full" });
+    expect(o.take()).toEqual([]);
   });
 });
 
@@ -318,6 +356,25 @@ describe("GameLobby messages", () => {
     now += 5_000;
     await send(t, x, { t: "leave" });
     expect(stored(t)).toEqual(before);
+  });
+
+  it("ignores a socket it closed even after eviction, so it can't take its seat back", async () => {
+    const t = setup();
+    await init(t.lobby);
+    const x = await join(t, "Xena");
+    const token = x.take().find((m) => m.t === "joined")?.token ?? undefined;
+    const o = await join(t, "Oscar");
+    await t.lobby.webSocketMessage(ws(x), new ArrayBuffer(2));
+    expect(x.closed?.code).toBe(1008);
+    o.take();
+
+    // Evicted: the new instance has no memory of closing it, and the client never answered.
+    t.lobby = t.make();
+    await send(t, x, { t: "join", name: "Zed", token });
+    expect(o.take()).toEqual([]);
+    expect(stored(t)?.seats.X).toMatchObject({ name: "Xena", connId: null });
+    const info = await t.lobby.fetch(new Request("https://lobby/info"));
+    expect(await info.json()).toMatchObject({ seatsTaken: 2, connectedSeats: 1 });
   });
 
   it("closes a socket that sends more than 10 frames in a second", async () => {

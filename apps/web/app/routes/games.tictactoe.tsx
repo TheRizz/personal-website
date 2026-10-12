@@ -1,12 +1,12 @@
 import { ArrowRight, Plus } from "lucide-react";
-import { useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useNavigate } from "react-router";
-import { LOBBY_CODE_LENGTH, LOBBY_IDLE_TTL_MS, normalizeLobbyCode } from "@site/game-core";
+import { LOBBY_CODE_LENGTH, LOBBY_IDLE_TTL_MS } from "@site/game-core";
 import { PageHeading } from "~/components/PageHeading";
 import { checkName, NameField } from "~/components/games/NameField";
 import { card, eyebrow, inputClass, primaryButton, secondaryButton } from "~/components/games/ui";
 import { createLobby, CREATE_ERROR_TEXT } from "~/lib/games/api";
-import { lobbyPath } from "~/lib/games/links";
+import { codeFromInput, lobbyPath } from "~/lib/games/links";
 import { saveName, useSavedName } from "~/lib/games/storage";
 import { pageMeta } from "~/lib/meta";
 import type { Route } from "./+types/games.tictactoe";
@@ -27,13 +27,26 @@ export default function TicTacToeLobby() {
   const [createError, setCreateError] = useState<string | null>(null);
   const [code, setCode] = useState("");
   const codeId = useId();
+  const nameInput = useRef<HTMLInputElement>(null);
+  // Aborted on unmount, so leaving the page mid-create doesn't pull the user into the lobby.
+  const lifetime = useRef<AbortController | null>(null);
   const name = draftName ?? savedName ?? "";
 
-  /** Validates and remembers the name; false (with the error shown) if it isn't usable. */
+  useEffect(() => {
+    const controller = new AbortController();
+    lifetime.current = controller;
+    return () => controller.abort();
+  }, []);
+
+  /**
+   * Validates and remembers the name; false if it isn't usable. Then the error is shown and the
+   * field focused, which scrolls it into view and announces the error.
+   */
   function confirmName(): boolean {
     const result = checkName(name);
     if (!result.ok) {
       setNameError(result.error);
+      nameInput.current?.focus();
       return false;
     }
     saveName(result.name);
@@ -44,7 +57,9 @@ export default function TicTacToeLobby() {
     setCreateError(null);
     if (!confirmName()) return;
     setCreating(true);
-    const result = await createLobby();
+    const signal = lifetime.current?.signal;
+    const result = await createLobby(fetch, signal);
+    if (signal?.aborted) return;
     if (result.ok) {
       navigate(lobbyPath(result.code));
       return;
@@ -74,6 +89,7 @@ export default function TicTacToeLobby() {
               setNameError(null);
             }}
             error={nameError}
+            inputRef={nameInput}
           />
         </div>
 
@@ -98,7 +114,7 @@ export default function TicTacToeLobby() {
             </button>
             <p id="create-error" aria-live="polite" className="text-sm empty:hidden">
               {createError && (
-                <span className="mt-3 block text-red-600 dark:text-red-400">{createError}</span>
+                <span className="mt-3 block text-red-700 dark:text-red-400">{createError}</span>
               )}
             </p>
           </section>
@@ -120,7 +136,7 @@ export default function TicTacToeLobby() {
               name="code"
               type="text"
               value={code}
-              onChange={(event) => setCode(normalizeLobbyCode(event.target.value))}
+              onChange={(event) => setCode(codeFromInput(event.target.value))}
               autoCapitalize="characters"
               autoComplete="off"
               autoCorrect="off"

@@ -3,6 +3,7 @@ import { defineConfig, devices } from "@playwright/test";
 // E2E_PORT lets several checkouts run the suite side by side.
 const PORT = Number(process.env.E2E_PORT ?? 4173);
 const CI = !!process.env.CI;
+const preview = `pnpm --filter web exec vite preview --port ${PORT} --strictPort`;
 
 /** End-to-end tests against the production build served by `vite preview` (workerd). */
 export default defineConfig({
@@ -22,7 +23,8 @@ export default defineConfig({
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    command: `pnpm build && pnpm --filter web exec vite preview --port ${PORT} --strictPort`,
+    // CI builds in its own earlier step (clearer failures), so it only serves that build here.
+    command: CI ? preview : `pnpm build && ${preview}`,
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: !CI,
     timeout: 180_000,

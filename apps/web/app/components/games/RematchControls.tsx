@@ -1,5 +1,6 @@
 import { RotateCcw } from "lucide-react";
-import { otherSeat, type PublicState, type Role } from "@site/game-core";
+import { useEffect, useRef } from "react";
+import { isSeat, otherSeat, SEATS, type PublicState, type Role } from "@site/game-core";
 import { playerName } from "~/lib/games/view";
 import { primaryButton } from "./ui";
 
@@ -15,21 +16,31 @@ export function RematchControls({
   disabled: boolean;
   onRematch: () => void;
 }) {
-  if (role !== "X" && role !== "O") {
-    const asked = (["X", "O"] as const).filter((seat) => state.rematch[seat]);
+  const waitingText = useRef<HTMLParagraphElement>(null);
+  const pressed = useRef(false);
+  const asked = isSeat(role) && state.rematch[role];
+
+  // "Play again" is replaced by the waiting text: move focus there rather than to <body>.
+  useEffect(() => {
+    if (asked && pressed.current) waitingText.current?.focus();
+    pressed.current = false;
+  }, [asked]);
+
+  if (!isSeat(role)) {
+    const [asker] = SEATS.filter((seat) => state.rematch[seat]);
     return (
       <p className="text-center text-muted">
-        {asked[0]
-          ? `${playerName(state, asked[0])} wants a rematch`
+        {asker
+          ? `${playerName(state, asker)} wants a rematch`
           : "Waiting for the players to start a rematch"}
       </p>
     );
   }
 
   const opponent = playerName(state, otherSeat(role));
-  if (state.rematch[role]) {
+  if (asked) {
     return (
-      <p className="text-center text-muted" role="status">
+      <p ref={waitingText} tabIndex={-1} className="text-center text-muted" role="status">
         Waiting for {opponent} to accept…
       </p>
     );
@@ -42,7 +53,15 @@ export function RematchControls({
           {opponent} wants a rematch
         </p>
       )}
-      <button type="button" onClick={onRematch} disabled={disabled} className={primaryButton}>
+      <button
+        type="button"
+        onClick={() => {
+          pressed.current = true;
+          onRematch();
+        }}
+        disabled={disabled}
+        className={primaryButton}
+      >
         <RotateCcw />
         Play again
       </button>

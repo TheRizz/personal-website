@@ -1,4 +1,4 @@
-import { isLobbyCode } from "@site/game-core";
+import { isLobbyCode, LOBBY_CREATE_LIMIT_PER_MINUTE } from "@site/game-core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { handleApi, rateLimitKey } from "./api";
 
@@ -7,7 +7,7 @@ type DoHandler = (request: Request, name: string) => Response | Promise<Response
 /** A fake Env: GAME_LOBBY records every stub call, the limiter allows `allowed` calls per key. */
 function fakeEnv({
   handler = () => new Response(null, { status: 500 }),
-  allowed = 10,
+  allowed = LOBBY_CREATE_LIMIT_PER_MINUTE,
 }: { handler?: DoHandler; allowed?: number } = {}) {
   const doCalls: { name: string; request: Request }[] = [];
   const limitKeys: string[] = [];
@@ -141,13 +141,13 @@ describe("POST /api/lobbies", () => {
 
   it("rate limits per IP with 429 and Retry-After: 60", async () => {
     const { env, doCalls, limitKeys } = fakeEnv({ handler: initHandler() });
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < LOBBY_CREATE_LIMIT_PER_MINUTE; i++) {
       expect((await handleApi(createRequest(), env)).status).toBe(201);
     }
     const limited = await handleApi(createRequest(), env);
     expect(limited.headers.get("Retry-After")).toBe("60");
     await expectError(limited, 429, "rate_limited");
-    expect(doCalls).toHaveLength(10);
+    expect(doCalls).toHaveLength(LOBBY_CREATE_LIMIT_PER_MINUTE);
     expect(new Set(limitKeys)).toEqual(new Set(["lobby-create:203.0.113.7"]));
 
     const otherIp = createRequest(undefined, { "CF-Connecting-IP": "203.0.113.8" });

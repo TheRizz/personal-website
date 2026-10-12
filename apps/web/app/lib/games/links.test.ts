@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inviteUrl, lobbyPath, socketUrl } from "./links";
+import { codeFromInput, inviteUrl, lobbyPath, socketUrl } from "./links";
 
 describe("links", () => {
   it("builds the lobby path and invite link", () => {
@@ -19,5 +19,15 @@ describe("links", () => {
     expect(socketUrl({ protocol: "http:", host: "localhost:5173" }, "K7QXM2")).toBe(
       "ws://localhost:5173/api/lobbies/K7QXM2/ws",
     );
+  });
+
+  it("takes the code from a typed code or a pasted invite link", () => {
+    expect(codeFromInput("k7q-xm2")).toBe("K7QXM2");
+    expect(codeFromInput("https://ry-mart.com/games/tictactoe/K7QXM2")).toBe("K7QXM2");
+    expect(codeFromInput("https://ry-mart.com/games/tictactoe/k7qxm2/?ref=chat#x")).toBe("K7QXM2");
+    expect(codeFromInput("localhost:4391/games/tictactoe/K7QXM2")).toBe("K7QXM2");
+    expect(codeFromInput("/games/tictactoe/K7QXM2")).toBe("K7QXM2");
+    expect(codeFromInput("ry-mart.com/K7QXM2")).toBe("K7QXM2");
+    expect(codeFromInput("https://ry-mart.com/")).toBe("");
   });
 });

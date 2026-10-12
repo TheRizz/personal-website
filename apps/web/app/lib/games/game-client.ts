@@ -214,9 +214,8 @@ export class GameClient {
       this.dispatch({ type: "notFound" });
       return;
     }
-    if (lookup.kind === "found" && lookup.full) {
-      this.dispatch({ type: "error", code: "LOBBY_FULL" });
-    }
+    // Still tries when it looks full: the estimate is approximate and spectators come and go.
+    if (lookup.kind === "found") this.dispatch({ type: "lobbyChecked", full: lookup.full });
     this.connect();
   }
 }

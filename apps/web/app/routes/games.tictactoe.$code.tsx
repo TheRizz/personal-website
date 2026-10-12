@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { data, redirect } from "react-router";
-import { isLobbyCode } from "@site/game-core";
+import { isLobbyCode, MAX_SPECTATORS_PER_LOBBY } from "@site/game-core";
 import { PageHeading } from "~/components/PageHeading";
 import { GameScreen } from "~/components/games/GameScreen";
 import { LobbyGonePanel } from "~/components/games/LobbyGonePanel";
@@ -8,7 +8,7 @@ import { NamePrompt } from "~/components/games/NamePrompt";
 import { card, secondaryButton } from "~/components/games/ui";
 import { lookupLobby, type LobbyLookup } from "~/lib/games/api";
 import { lobbyPath } from "~/lib/games/links";
-import { saveName, useSavedName } from "~/lib/games/storage";
+import { loadToken, saveName, useSavedName } from "~/lib/games/storage";
 import { pageMeta } from "~/lib/meta";
 import type { Route } from "./+types/games.tictactoe.$code";
 
@@ -80,28 +80,42 @@ function LobbyGate({ code, name }: { code: string; name: string }) {
     return () => controller.abort();
   }, [code, tries]);
 
+  const retry = () => {
+    setLookup(null);
+    setTries((n) => n + 1);
+  };
+
   if (!lookup) return <Placeholder text="Finding game…" />;
   if (lookup.kind === "notFound") return <LobbyGonePanel />;
   if (lookup.kind === "error") {
     return (
-      <div
-        className={`${card} flex min-h-64 flex-col items-center justify-center gap-4 text-center`}
-      >
-        <p className="text-muted" role="alert">
-          Couldn't reach the game server. Check your connection and try again.
-        </p>
-        <button
-          type="button"
-          className={secondaryButton}
-          onClick={() => {
-            setLookup(null);
-            setTries((n) => n + 1);
-          }}
-        >
-          Try again
-        </button>
-      </div>
+      <RetryPanel
+        text="Couldn't reach the game server. Check your connection and try again."
+        onRetry={retry}
+      />
+    );
+  }
+  // A tab holding a seat token always tries: its seat is never refused.
+  if (lookup.full && !loadToken(code)) {
+    return (
+      <RetryPanel
+        text={`This game is full: both seats are taken and ${MAX_SPECTATORS_PER_LOBBY} people are watching. Try again in a little while.`}
+        onRetry={retry}
+      />
     );
   }
   return <GameScreen key={name} code={code} name={name} />;
+}
+
+function RetryPanel({ text, onRetry }: { text: string; onRetry: () => void }) {
+  return (
+    <div className={`${card} flex min-h-64 flex-col items-center justify-center gap-4 text-center`}>
+      <p className="max-w-[44ch] text-muted" role="alert">
+        {text}
+      </p>
+      <button type="button" className={secondaryButton} onClick={onRetry}>
+        Try again
+      </button>
+    </div>
+  );
 }

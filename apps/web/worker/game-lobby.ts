@@ -2,6 +2,7 @@ import {
   CLOSE_CODES,
   MAX_MESSAGES_PER_SECOND,
   MAX_SOCKETS_PER_LOBBY,
+  SEATS,
   closeConnection,
   createLobby,
   handleAlarm,
@@ -63,9 +64,12 @@ export class GameLobby implements DurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
+    // The runtime still delivers frames from a socket after the server closed it. `gone` is lost
+    // on eviction, but readyState survives hibernation, so such a socket can't rejoin afterwards.
+    if (ws.readyState !== WebSocket.OPEN) return;
     const conn = this.connection(ws);
     if (!this.lobby || !conn || this.gone.has(conn.connId)) return;
-    const ctx = { now: Date.now() };
+    const ctx = { now: Date.now(), spectators: this.spectatorCount() };
     let result: LobbyResult;
     if (typeof message !== "string") {
       const reason = "Binary frames are not supported.";
@@ -112,7 +116,9 @@ export class GameLobby implements DurableObject {
     }
     if (!this.lobby) return jsonError(404, "not_found", "Lobby not found.");
     this.pruneGone();
-    if (this.liveSockets().length >= MAX_SOCKETS_PER_LOBBY) {
+    // Spectators are capped on join (game-core), so a full lobby still has a spare socket per seat:
+    // a player reclaiming a held seat must never be refused here.
+    if (this.liveSockets().length >= MAX_SOCKETS_PER_LOBBY + SEATS.length) {
       return jsonError(409, "LOBBY_FULL", "This lobby is full.");
     }
     const { 0: client, 1: server } = new WebSocketPair();
@@ -182,10 +188,11 @@ export class GameLobby implements DurableObject {
     return this.gone.has(connId) ? undefined : this.ctx.getWebSockets(connId)[0];
   }
 
-  /** Accepted sockets that have not closed, with their attachments. */
+  /** Accepted sockets that are open and not closed by us, with their attachments. */
   private liveSockets(): { ws: WebSocket; conn: Connection }[] {
     const live: { ws: WebSocket; conn: Connection }[] = [];
     for (const ws of this.ctx.getWebSockets()) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
       const conn = this.connection(ws);
       if (conn && !this.gone.has(conn.connId)) live.push({ ws, conn });
     }

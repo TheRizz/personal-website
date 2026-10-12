@@ -1,4 +1,9 @@
-import { CLOSE_CODES, LOBBY_IDLE_TTL_MS, RECONNECT_GRACE_MS } from "./constants";
+import {
+  CLOSE_CODES,
+  LOBBY_IDLE_TTL_MS,
+  MAX_SPECTATORS_PER_LOBBY,
+  RECONNECT_GRACE_MS,
+} from "./constants";
 import { otherSeat, SEATS, type Seat } from "./game";
 import { GAMES, type GameId } from "./games";
 import {
@@ -72,6 +77,8 @@ export interface LobbyContext {
   now: number;
   /** Seat token generator. Defaults to crypto.randomUUID. */
   newToken?: () => string;
+  /** Live spectator sockets, for the MAX_SPECTATORS_PER_LOBBY cap on join. Defaults to 0. */
+  spectators?: number;
 }
 
 /**
@@ -111,7 +118,10 @@ export interface LobbySummary {
   code: string;
   game: GameId;
   phase: LobbyPhase;
+  /** Seats with a player, including seats held for a disconnected player. */
   seatsTaken: number;
+  /** Seats whose player is connected right now (each has a live socket). */
+  connectedSeats: number;
   spectators: number;
 }
 
@@ -200,6 +210,7 @@ export function lobbySummary(lobby: LobbyRecord, spectators: number): LobbySumma
     game: lobby.game,
     phase: lobby.phase,
     seatsTaken: SEATS.filter((seat) => lobby.seats[seat] !== null).length,
+    connectedSeats: SEATS.filter((seat) => lobby.seats[seat]?.connId != null).length,
     spectators,
   };
 }
@@ -278,6 +289,17 @@ function join(tx: Tx, conn: Connection, msg: JoinMsg, ctx: LobbyContext): void {
   const seat = reclaimed ?? SEATS.find((s) => lobby.seats[s] === null);
 
   if (seat === undefined) {
+    // Seat claims and token reconnects are never refused; only extra spectators are.
+    if ((ctx.spectators ?? 0) >= MAX_SPECTATORS_PER_LOBBY) {
+      sendError(tx, conn.connId, "LOBBY_FULL", "This lobby is full.");
+      tx.effects.push({
+        type: "close",
+        connId: conn.connId,
+        code: CLOSE_CODES.lobbyFull,
+        reason: "Lobby full",
+      });
+      return;
+    }
     tx.effects.push(
       { type: "setRole", connId: conn.connId, role: "spectator" },
       { type: "send", connId: conn.connId, msg: { t: "joined", role: "spectator", token: null } },
@@ -365,7 +387,10 @@ function leave(tx: Tx, conn: Connection, role: Role): void {
 /**
  * Handles a parsed client message from `conn`. Every message counts as activity.
  *
- * Errors are sent only to `conn` and leave the socket open: NOT_JOINED (anything before join),
+ * A join that would add a spectator past MAX_SPECTATORS_PER_LOBBY (ctx.spectators) gets LOBBY_FULL
+ * and the socket is closed with CLOSE_CODES.lobbyFull.
+ *
+ * Other errors are sent only to `conn` and leave the socket open: NOT_JOINED (anything before join),
  * BAD_MESSAGE (second join, rematch outside a finished game or from a spectator),
  * NOT_A_PLAYER (spectator move), STALE_STATE (move.seq !== lobby.seq), NOT_YOUR_TURN
  * (also while waiting for an opponent), INVALID_MOVE, GAME_OVER.

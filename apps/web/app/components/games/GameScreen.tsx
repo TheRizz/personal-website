@@ -1,9 +1,10 @@
 import { Eye, LogOut } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import type { PublicState, Role } from "@site/game-core";
+import { isSeat, type PublicState, type Role } from "@site/game-core";
 import type { ConnectionStatus } from "~/lib/games/client-state";
 import { useGameSocket } from "~/lib/games/useGameSocket";
-import { statusHeadline } from "~/lib/games/view";
+import { announcement, statusHeadline } from "~/lib/games/view";
 import { ConnectionBadge, ConnectionNotice } from "./ConnectionBadge";
 import { DisconnectNotice } from "./DisconnectNotice";
 import { LobbyGonePanel } from "./LobbyGonePanel";
@@ -18,6 +19,22 @@ import { WaitingPanel } from "./WaitingPanel";
 export function GameScreen({ code, name }: { code: string; name: string }) {
   const game = useGameSocket(code, name);
   const navigate = useNavigate();
+  const announced = useAnnouncement(game.state, game.role);
+  const badge = useRef<HTMLSpanElement>(null);
+  // Set when a button that goes away on success (Reconnect, Watch here, Take the empty seat) is
+  // pressed, so focus can land on the badge instead of falling back to <body>.
+  const refocus = useRef(false);
+
+  function reconnect() {
+    refocus.current = true;
+    game.reconnect();
+  }
+
+  useEffect(() => {
+    if (!refocus.current || game.connection === "connecting") return;
+    refocus.current = false;
+    if (focusIsLost()) badge.current?.focus();
+  }, [game.connection]);
 
   function leave() {
     game.leave();
@@ -29,32 +46,50 @@ export function GameScreen({ code, name }: { code: string; name: string }) {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
+      <p className="sr-only" aria-live="polite">
+        {announced}
+      </p>
+
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
-        <ConnectionBadge connection={game.connection} attempt={game.attempt} />
+        <ConnectionBadge
+          ref={badge}
+          connection={game.connection}
+          attempt={game.attempt}
+          lobbyFull={game.lobbyFull}
+        />
         <button type="button" onClick={leave} className={ghostButton}>
           <LogOut aria-hidden="true" />
           Leave game
         </button>
       </div>
 
-      <ConnectionNotice connection={game.connection} onReconnect={game.reconnect} />
+      <ConnectionNotice
+        connection={game.connection}
+        lobbyFull={game.lobbyFull}
+        onReconnect={reconnect}
+      />
 
       {game.role === "spectator" && (
         <SpectatorBanner
           canTakeSeat={game.state?.phase === "waiting" && game.connection === "open"}
-          onTakeSeat={game.reconnect}
+          onTakeSeat={reconnect}
         />
       )}
 
-      {game.state && <DisconnectNotice state={game.state} role={game.role} />}
-
       {!game.state ? (
         <div className={`${card} flex min-h-64 items-center justify-center text-muted`}>
-          {game.connection === "failed" ? "Couldn't connect to the game." : "Joining game…"}
+          {game.connection !== "failed"
+            ? "Joining game…"
+            : game.lobbyFull
+              ? "This game is full."
+              : "Couldn't connect to the game."}
         </div>
       ) : game.state.phase === "waiting" ? (
-        <WaitingPanel code={code} spectating={game.role === "spectator"} />
+        <>
+          <DisconnectNotice state={game.state} role={game.role} />
+          <WaitingPanel code={code} spectating={game.role === "spectator"} />
+        </>
       ) : (
         <Match
           state={game.state}
@@ -69,6 +104,24 @@ export function GameScreen({ code, name }: { code: string; name: string }) {
       <Toast message={game.lastError} />
     </div>
   );
+}
+
+/** True when the focused element was removed (focus fell back to <body>). */
+function focusIsLost(): boolean {
+  return document.activeElement === null || document.activeElement === document.body;
+}
+
+/** The latest screen-reader announcement for changes to the lobby (see `announcement`). */
+function useAnnouncement(state: PublicState | null, role: Role | null): string {
+  const [text, setText] = useState("");
+  const previous = useRef<PublicState | null>(null);
+  useEffect(() => {
+    const prev = previous.current;
+    previous.current = state;
+    const next = state && announcement(prev, state, role);
+    if (next) setText(next);
+  }, [state, role]);
+  return text;
 }
 
 function SpectatorBanner({
@@ -114,34 +167,57 @@ function Match({
   onRematch: () => void;
 }) {
   const headline = statusHeadline(state, role);
-  const seat = role === "X" || role === "O" ? role : null;
+  const seat = isSeat(role) ? role : null;
   const connected = connection === "open";
+  const boardRef = useRef<HTMLDivElement>(null);
+  const round = useRef(state.round);
+
+  // Once the game starts, bring the whole board into view (on phones it starts below the fold).
+  useEffect(() => {
+    const board = boardRef.current;
+    if (!board) return;
+    const { top, bottom } = board.getBoundingClientRect();
+    if (top >= 0 && bottom <= window.innerHeight) return;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    board.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
+  }, []);
+
+  // A new round removes the rematch controls; keep keyboard focus on the board.
+  useEffect(() => {
+    if (state.round === round.current) return;
+    round.current = state.round;
+    if (focusIsLost()) boardRef.current?.querySelector("button")?.focus();
+  }, [state.round]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <PlayerBar state={state} role={role} />
+      {/* Always two lines tall, so the board doesn't move when the text wraps on some turns. */}
       <p
-        aria-live="polite"
-        className={`text-center text-3xl leading-tight font-extrabold tracking-[-0.03em] sm:text-4xl ${
+        className={`flex min-h-[2lh] items-center justify-center text-center text-2xl leading-tight font-extrabold tracking-[-0.03em] text-balance sm:text-4xl ${
           headline.outcome === "lose" || (!headline.outcome && !(headline.yourMove && connected))
             ? "text-muted"
             : "text-fg"
         }`}
       >
-        {headline.text}
+        <span className="line-clamp-2 break-words">{headline.text}</span>
       </p>
-      <TicTacToeBoard
-        board={state.board.board}
-        result={state.result}
-        mySeat={seat}
-        canMove={connected && headline.yourMove && pendingCell === null}
-        pendingCell={pendingCell}
-        onPlay={onPlay}
-        dimmed={!connected}
-      />
+      <div ref={boardRef}>
+        <TicTacToeBoard
+          board={state.board.board}
+          result={state.result}
+          mySeat={seat}
+          canMove={connected && headline.yourMove && pendingCell === null}
+          pendingCell={pendingCell}
+          onPlay={onPlay}
+          dimmed={!connected}
+        />
+      </div>
       {state.phase === "finished" && (
         <RematchControls state={state} role={role} disabled={!connected} onRematch={onRematch} />
       )}
+      {/* Below the board, so it appearing mid-turn can't shift a cell under the player's finger. */}
+      <DisconnectNotice state={state} role={role} />
     </div>
   );
 }

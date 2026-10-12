@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useRef, useState, type FormEvent } from "react";
 import { checkName, NameField } from "./NameField";
 import { card, primaryButton } from "./ui";
 
@@ -6,12 +6,17 @@ import { card, primaryButton } from "./ui";
 export function NamePrompt({ code, onSubmit }: { code: string; onSubmit: (name: string) => void }) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   function submit(event: FormEvent) {
     event.preventDefault();
     const result = checkName(value);
-    if (result.ok) onSubmit(result.name);
-    else setError(result.error);
+    if (result.ok) {
+      onSubmit(result.name);
+    } else {
+      setError(result.error);
+      inputRef.current?.focus();
+    }
   }
 
   return (
@@ -37,6 +42,7 @@ export function NamePrompt({ code, onSubmit }: { code: string; onSubmit: (name: 
         }}
         error={error}
         autoFocus
+        inputRef={inputRef}
       />
       <button type="submit" className={`${primaryButton} w-full sm:w-auto`}>
         Join game

@@ -11,12 +11,16 @@ export const CREATE_ERROR_TEXT = {
 } as const;
 
 /** POST /api/lobbies for a new tic-tac-toe lobby. */
-export async function createLobby(fetchFn: Fetch = fetch): Promise<CreateLobbyResult> {
+export async function createLobby(
+  fetchFn: Fetch = fetch,
+  signal?: AbortSignal,
+): Promise<CreateLobbyResult> {
   try {
     const response = await fetchFn("/api/lobbies", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ game: "tictactoe" }),
+      signal,
     });
     if (response.status === 429) return { ok: false, error: "rate_limited" };
     if (response.status !== 201) return { ok: false, error: "failed" };
@@ -48,10 +52,11 @@ export async function lookupLobby(
     });
     if (response.status === 404) return { kind: "notFound" };
     if (!response.ok) return { kind: "error" };
-    const body = (await response.json()) as { seatsTaken?: unknown; spectators?: unknown };
-    const seats = typeof body.seatsTaken === "number" ? body.seatsTaken : 0;
+    const body = (await response.json()) as { connectedSeats?: unknown; spectators?: unknown };
+    // Connected seats only: a seat held for a disconnected player may be this client's own.
+    const seats = typeof body.connectedSeats === "number" ? body.connectedSeats : 0;
     const spectators = typeof body.spectators === "number" ? body.spectators : 0;
-    // Only approximate (sockets that haven't joined yet also count towards the cap).
+    // Only approximate: the server has the final say when the socket joins.
     return { kind: "found", full: seats + spectators >= MAX_SOCKETS_PER_LOBBY };
   } catch {
     return { kind: "error" };

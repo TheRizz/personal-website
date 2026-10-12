@@ -30,15 +30,27 @@ describe("createLobby", () => {
 });
 
 describe("lookupLobby", () => {
-  it("reports found, full, not found and errors", async () => {
+  it("reports a found lobby and whether it looks full", async () => {
     const summary = { code: "K7QXM2", game: "tictactoe", phase: "waiting", seatsTaken: 1 };
-    await expect(lookupLobby("K7QXM2", json(200, { ...summary, spectators: 0 }))).resolves.toEqual({
+    const lookup = (fields: object) => lookupLobby("K7QXM2", json(200, { ...summary, ...fields }));
+    await expect(lookup({ connectedSeats: 1, spectators: 0 })).resolves.toEqual({
       kind: "found",
       full: false,
     });
+    await expect(lookup({ seatsTaken: 2, connectedSeats: 2, spectators: 8 })).resolves.toEqual({
+      kind: "found",
+      full: true,
+    });
+  });
+
+  it("doesn't count a held seat, which may be the reconnecting player's own", async () => {
+    const summary = { code: "K7QXM2", game: "tictactoe", phase: "playing", seatsTaken: 2 };
     await expect(
-      lookupLobby("K7QXM2", json(200, { ...summary, seatsTaken: 2, spectators: 8 })),
-    ).resolves.toEqual({ kind: "found", full: true });
+      lookupLobby("K7QXM2", json(200, { ...summary, connectedSeats: 1, spectators: 8 })),
+    ).resolves.toEqual({ kind: "found", full: false });
+  });
+
+  it("reports not found and errors", async () => {
     await expect(lookupLobby("K7QXM2", json(404, {}))).resolves.toEqual({ kind: "notFound" });
     await expect(lookupLobby("K7QXM2", json(500, {}))).resolves.toEqual({ kind: "error" });
   });

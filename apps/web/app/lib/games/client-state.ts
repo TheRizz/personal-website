@@ -66,14 +66,20 @@ export interface ClientState {
   server: { state: PublicState; seq: number } | null;
   pending: PendingMove | null;
   lastError: ClientError | null;
+  /**
+   * The server refused this client because the lobby is full, or the last lookup said it looks
+   * full. Cleared once joined, on a manual reconnect and when a lookup sees room. Lets a failed
+   * reconnect loop say the game is full rather than blame the network.
+   */
+  lobbyFull: boolean;
 }
 
 export type ClientAction =
   | { type: "message"; msg: ServerMsg }
   | { type: "closed"; code: number }
   | { type: "moveSent"; pending: PendingMove }
-  /** A client-detected problem to show, e.g. the lobby looks full while reconnecting. */
-  | { type: "error"; code: ClientError["code"] }
+  /** The lobby lookup before an automatic reconnect found it; `full` is the estimate. */
+  | { type: "lobbyChecked"; full: boolean }
   /** The connection has stayed joined for STABLE_CONNECTION_MS. */
   | { type: "stable" }
   | { type: "reconnect" }
@@ -87,6 +93,7 @@ export const initialClientState: ClientState = {
   server: null,
   pending: null,
   lastError: null,
+  lobbyFull: false,
 };
 
 const ERROR_TEXT: Record<ClientError["code"], string> = {
@@ -130,7 +137,8 @@ export function classifyClose(code: number): CloseKind {
 
 function withError(state: ClientState, code: ClientError["code"]): ClientState {
   const id = (state.lastError?.id ?? 0) + 1;
-  return { ...state, lastError: { code, text: errorText(code), id } };
+  const lobbyFull = state.lobbyFull || code === "LOBBY_FULL";
+  return { ...state, lastError: { code, text: errorText(code), id }, lobbyFull };
 }
 
 /** Applies one event. Never mutates `state`. */
@@ -138,7 +146,9 @@ export function clientReducer(state: ClientState, action: ClientAction): ClientS
   switch (action.type) {
     case "message": {
       const { msg } = action;
-      if (msg.t === "joined") return { ...state, connection: "open", role: msg.role };
+      if (msg.t === "joined") {
+        return { ...state, connection: "open", role: msg.role, lobbyFull: false };
+      }
       if (msg.t === "state") {
         // A snapshot at the same seq (e.g. a spectator arrived) doesn't include our move yet.
         const keepPending = state.pending !== null && msg.seq === state.pending.baseSeq;
@@ -175,14 +185,15 @@ export function clientReducer(state: ClientState, action: ClientAction): ClientS
     case "moveSent":
       return { ...state, pending: action.pending };
 
-    case "error":
-      return withError(state, action.code);
+    case "lobbyChecked":
+      if (action.full) return withError(state, "LOBBY_FULL");
+      return state.lobbyFull ? { ...state, lobbyFull: false } : state;
 
     case "stable":
       return state.attempt === 0 ? state : { ...state, attempt: 0 };
 
     case "reconnect":
-      return { ...state, connection: "connecting", attempt: 0, pending: null };
+      return { ...state, connection: "connecting", attempt: 0, pending: null, lobbyFull: false };
 
     case "notFound":
       return { ...state, connection: "notFound", attempt: 0, pending: null };

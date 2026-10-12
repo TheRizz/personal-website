@@ -96,7 +96,27 @@ describe("close codes", () => {
     expect(classifyClose(4000)).toBe("replaced");
     expect(classifyClose(4001)).toBe("expired");
     expect(classifyClose(1008)).toBe("policy");
-    for (const code of [1000, 1001, 1006, 1011, 1012]) expect(classifyClose(code)).toBe("retry");
+    // 4002 (lobby full) is retried: spectators come and go.
+    for (const code of [1000, 1001, 1006, 1011, 1012, 4002]) {
+      expect(classifyClose(code)).toBe("retry");
+    }
+  });
+
+  it("remembers a full lobby until it joins, sees room or reconnects manually", () => {
+    const full = msg({ t: "error", code: "LOBBY_FULL", message: "Full." });
+    const refused = clientReducer(initialClientState, full);
+    expect(refused).toMatchObject({ lobbyFull: true, lastError: { code: "LOBBY_FULL" } });
+    // Kept through closes, so the final failed state can say why.
+    expect(clientReducer(refused, { type: "closed", code: 4002 }).lobbyFull).toBe(true);
+    expect(clientReducer(refused, { type: "lobbyChecked", full: false }).lobbyFull).toBe(false);
+    expect(clientReducer(refused, { type: "reconnect" }).lobbyFull).toBe(false);
+    const joined = msg({ t: "joined", role: "spectator", token: null });
+    expect(clientReducer(refused, joined).lobbyFull).toBe(false);
+
+    const looked = clientReducer(initialClientState, { type: "lobbyChecked", full: true });
+    expect(looked).toMatchObject({ lobbyFull: true, lastError: { code: "LOBBY_FULL" } });
+    const fine = clientReducer(initialClientState, { type: "lobbyChecked", full: false });
+    expect(fine).toBe(initialClientState);
   });
 
   it("4000 means another tab took the seat: no auto-reconnect", () => {

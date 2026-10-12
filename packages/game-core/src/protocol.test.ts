@@ -3,6 +3,7 @@ import { MAX_MESSAGE_BYTES, MAX_NAME_LENGTH } from "./constants";
 import {
   clientMsgSchema,
   createLobbyRequestSchema,
+  displayNameSchema,
   parseClientMessage,
   serverMsgSchema,
   type PublicState,
@@ -109,17 +110,20 @@ describe("parseClientMessage", () => {
     });
   });
 
-  it("reports invalid with the first issue for a known type with bad fields", () => {
+  it("reports invalid for a known type with bad fields", () => {
     const result = parseClientMessage(JSON.stringify({ t: "join", name: "   " }));
-    expect(result).toEqual({ ok: false, reason: "invalid", message: "Name is required." });
+    expect(result).toEqual({ ok: false, reason: "invalid" });
   });
 
-  it("explains a name with nothing visible in it", () => {
-    expect(parseClientMessage(JSON.stringify({ t: "join", name: " \u200b\u3164 " }))).toEqual({
+  it("rejects a name with nothing visible in it, and explains why", () => {
+    const name = " \u200b\u3164 ";
+    expect(parseClientMessage(JSON.stringify({ t: "join", name }))).toEqual({
       ok: false,
       reason: "invalid",
-      message: "Name must contain a visible character.",
     });
+    expect(displayNameSchema.safeParse(name).error?.issues.map((i) => i.message)).toEqual([
+      "Name must contain a visible character.",
+    ]);
   });
 
   it("reports invalid for junk keys", () => {

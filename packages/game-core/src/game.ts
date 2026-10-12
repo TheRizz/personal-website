@@ -3,6 +3,10 @@ export type Seat = "X" | "O";
 
 export const SEATS = ["X", "O"] as const satisfies readonly Seat[];
 
+/** Narrows a role (or anything else) to a player seat. */
+export const isSeat = (value: unknown): value is Seat =>
+  (SEATS as readonly unknown[]).includes(value);
+
 /** The opposing seat. */
 export const otherSeat = (seat: Seat): Seat => (seat === "X" ? "O" : "X");
 

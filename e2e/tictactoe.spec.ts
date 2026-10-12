@@ -5,9 +5,10 @@ import {
   type BrowserContext,
   type BrowserContextOptions,
   type Page,
+  type WebSocketRoute,
 } from "@playwright/test";
 import { MAX_SOCKETS_PER_LOBBY, generateLobbyCode } from "../packages/game-core/src/index";
-import { BASE_URL, LobbyClient, createLobby, uniqueIp } from "./helpers";
+import { BASE_URL, LobbyClient, createLobby, sleep, uniqueIp } from "./helpers";
 
 /** One simulated person: their own browser context (storage, cookies) and client IP. */
 interface Player {
@@ -55,6 +56,7 @@ function newContext(browser: Browser, options: BrowserContextOptions = {}) {
 }
 
 const LOBBY_URL = /\/games\/tictactoe\/([A-Z2-9]{6})$/;
+const SOCKET_URL = /\/api\/lobbies\/[A-Z2-9]{6}\/ws$/;
 
 const board = (page: Page) => page.getByRole("group", { name: "Tic-tac-toe board" });
 /** Board cell 0..8 (row-major); its accessible name is e.g. "Row 1, column 2, X". */
@@ -199,7 +201,7 @@ test.describe("tic-tac-toe in the browser", () => {
     // Both ask for a rematch: round 2, O starts.
     await alice.page.getByRole("button", { name: "Play again" }).click();
     await expect(alice.page.getByText("Waiting for Bob to accept…")).toBeVisible();
-    await expect(bob.page.getByText("Alice wants a rematch")).toBeVisible();
+    await expect(bob.page.getByText("Alice wants a rematch", { exact: true })).toBeVisible();
     await bob.page.getByRole("button", { name: "Play again" }).click();
     for (const page of pages) {
       await expect(page.getByText("Round 2 • 0 draws")).toBeVisible();
@@ -298,6 +300,9 @@ test.describe("tic-tac-toe in the browser", () => {
     const typed = `${code.slice(0, 3).toLowerCase()} - ${code.slice(3).toLowerCase()}`;
     await input.pressSequentially(typed);
     await expect(input).toHaveValue(code);
+    // A pasted invite link works too.
+    await input.fill(`${BASE_URL}/games/tictactoe/${code}?from=chat`);
+    await expect(input).toHaveValue(code);
     await join.click();
 
     await expect(bob).toHaveURL(new RegExp(`/games/tictactoe/${code}$`));
@@ -375,7 +380,7 @@ test.describe("tic-tac-toe in the browser", () => {
 
     await alice.getByRole("button", { name: "Leave game" }).click();
     await expect(alice).toHaveURL(/\/games\/tictactoe$/);
-    await expect(bob.getByText("Waiting for an opponent…")).toBeVisible();
+    await expect(bob.getByRole("region", { name: "Waiting for an opponent" })).toBeVisible();
     await carol.getByRole("button", { name: "Take the empty seat" }).click();
 
     await expect(playerCard(carol, "X")).toContainText("You");
@@ -422,7 +427,7 @@ test.describe("tic-tac-toe in the browser", () => {
     await expectCell([bob.page], 4, "O");
   });
 
-  test("a full lobby says so", async ({ open, request }) => {
+  test("a full lobby says so, and lets you in once there's room", async ({ open, request }) => {
     const { code } = await createLobby(request);
     const sockets: LobbyClient[] = [];
     try {
@@ -431,10 +436,153 @@ test.describe("tic-tac-toe in the browser", () => {
       }
       const { page } = await open();
       await acceptInvite(page, code, "Late");
-      await expect(page.getByText("This game is full. Try again in a little while.")).toBeVisible();
+      await expect(page.getByText(/^This game is full: both seats are taken/)).toBeVisible();
       await expect(page.getByText("You're watching.")).toHaveCount(0);
+
+      // A spectator leaves.
+      sockets.pop()!.close();
+      await expect(async () => {
+        await page.getByRole("button", { name: "Try again" }).click();
+        await expect(page.getByText("You're watching.")).toBeVisible({ timeout: 1_000 });
+      }).toPass({ timeout: 10_000 });
     } finally {
       for (const socket of sockets) socket.close();
     }
+  });
+
+  test("an expired lobby says so", async ({ open }) => {
+    const { page } = await open();
+    const routes: WebSocketRoute[] = [];
+    await page.routeWebSocket(SOCKET_URL, (ws) => {
+      ws.connectToServer();
+      routes.push(ws);
+    });
+    await createGame(page, "Alice");
+    await routes.at(-1)!.close({ code: 4001, reason: "Lobby expired" });
+    await expect(page.getByRole("heading", { name: "This game has expired" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Start a new game" })).toBeVisible();
+  });
+
+  test("a lost connection says so, and Reconnect recovers", async ({ open }) => {
+    test.setTimeout(60_000);
+    const { page } = await open();
+    let offline = false;
+    const routes: WebSocketRoute[] = [];
+    await page.routeWebSocket(SOCKET_URL, (ws) => {
+      if (offline) {
+        void ws.close({ code: 1011, reason: "Unavailable" });
+        return;
+      }
+      ws.connectToServer();
+      routes.push(ws);
+    });
+    await createGame(page, "Alice");
+
+    offline = true;
+    await routes.at(-1)!.close({ code: 1011, reason: "Unavailable" });
+    await expect(page.getByText(/^Reconnecting \(\d of 5\)/)).toBeVisible();
+    // The backoff runs out after about 15 s.
+    await expect(page.getByText("Connection lost.")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText("Check your connection, then try again.")).toBeVisible();
+    await expect(page.getByRole("status").getByText("Offline")).toBeVisible();
+
+    offline = false;
+    await page.getByRole("button", { name: "Reconnect" }).click();
+    await expect(page.getByRole("status").getByText("Connected")).toBeVisible();
+    await expect(page.getByText("Connection lost.")).toHaveCount(0);
+    await expect(page.getByRole("region", { name: "Waiting for an opponent" })).toBeVisible();
+    // Focus doesn't fall back to the page when the Reconnect button goes away.
+    await expect(page.getByRole("status").getByText("Connected")).toBeFocused();
+  });
+
+  test("a create error is shown under the button", async ({ open }) => {
+    const { page } = await open();
+    await page.route("**/api/lobbies", (route) =>
+      route.fulfill({
+        status: 429,
+        json: { error: { code: "rate_limited", message: "Too many lobbies." } },
+      }),
+    );
+    await page.goto("/games/tictactoe");
+    await fillName(page, "Alice");
+    await page.getByRole("button", { name: "Create game" }).click();
+    await expect(
+      page.getByText("You've created a lot of games — try again in a minute."),
+    ).toBeVisible();
+    await expect(page).toHaveURL(/\/games\/tictactoe$/);
+  });
+
+  test("a missing name is shown and focused, even when scrolled away", async ({ open }) => {
+    const { page } = await open({ viewport: { width: 360, height: 640 } });
+    await page.goto("/games/tictactoe");
+    const code = page.getByLabel("Enter the 6-character code from your friend.");
+    await code.fill("ABCDEF");
+    await code.press("Enter");
+    const name = page.getByLabel("Your name");
+    await expect(name).toBeFocused();
+    await expect(page.getByText("Name is required.")).toBeInViewport();
+    await expect(page).toHaveURL(/\/games\/tictactoe$/);
+
+    await fillName(page, "   ");
+    await page.getByRole("button", { name: "Create game" }).click();
+    await expect(page.getByText("Name is required.")).toBeVisible();
+    await expect(name).toBeFocused();
+  });
+
+  test("leaving the page while a game is being created stays where you went", async ({ open }) => {
+    const { page } = await open();
+    let answered!: () => void;
+    const slowCreate = new Promise<void>((resolve) => (answered = resolve));
+    await page.route("**/api/lobbies", async (route) => {
+      await sleep(1_000);
+      // The page may have given up on the request by now.
+      await route.continue().catch(() => {});
+      answered();
+    });
+    await page.goto("/games/tictactoe");
+    await fillName(page, "Alice");
+    await page.getByRole("button", { name: "Create game" }).click();
+    await page.locator('header a[href="/"]').click();
+    await expect(page).toHaveURL(`${BASE_URL}/`);
+    await slowCreate;
+    await sleep(500);
+    await expect(page).toHaveURL(`${BASE_URL}/`);
+  });
+
+  test("keyboard focus stays put through a rematch", async ({ open }) => {
+    const { alice, bob } = await startGame(open);
+    await playMoves(alice, bob, [0, 3, 1, 4, 2], ["X", "O"]);
+
+    await alice.getByRole("button", { name: "Play again" }).focus();
+    await alice.keyboard.press("Enter");
+    await expect(alice.getByText("Waiting for Bob to accept…")).toBeFocused();
+
+    await bob.getByRole("button", { name: "Play again" }).focus();
+    await bob.keyboard.press("Enter");
+    for (const page of [alice, bob]) await expect(cell(page, 0)).toBeFocused();
+  });
+
+  test("on a phone the board is in view and stays put when the turn passes or the opponent drops", async ({
+    open,
+  }) => {
+    const alice = (await open({ viewport: { width: 360, height: 640 } })).page;
+    const bob = (await open()).page;
+    const code = await createGame(alice, "Alice");
+    await acceptInvite(bob, code, "Christopher Long");
+    // Relative to the document, so scrolling the board into view doesn't count.
+    const boardTop = () =>
+      board(alice).evaluate((el) => Math.round(el.getBoundingClientRect().top + window.scrollY));
+
+    await expect(headline(alice, "Your move")).toBeVisible();
+    // The whole board is scrolled into view when the game starts.
+    await expect(board(alice)).toBeInViewport({ ratio: 0.99 });
+    const top = await boardTop();
+    await cell(alice, 4).click();
+    await expect(headline(alice, "Waiting for Christopher Long")).toBeVisible();
+    expect(await boardTop()).toBe(top);
+
+    await bob.close();
+    await expect(alice.getByText(/^Christopher Long disconnected — seat held/)).toBeVisible();
+    expect(await boardTop()).toBe(top);
   });
 });

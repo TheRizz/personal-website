@@ -156,11 +156,10 @@ export type ParseClientMessageResult =
       ok: false;
       /**
        * Every reason is a protocol violation: the DO closes the socket with 1008 (see handleText).
-       * invalid = a known message type whose fields fail the schema.
+       * invalid = a known message type whose fields fail the schema. lobby.ts maps each reason to
+       * the close reason the client sees.
        */
       reason: "too_large" | "bad_json" | "unknown_type" | "invalid";
-      /** Human-readable detail (for invalid: the schema issues). May exceed a close reason's limit. */
-      message: string;
     };
 
 const encoder = new TextEncoder();
@@ -175,25 +174,22 @@ function exceedsMessageBytes(text: string): boolean {
 /** Parses one client text frame: size check, JSON, then the ClientMsg schema. */
 export function parseClientMessage(text: string): ParseClientMessageResult {
   if (exceedsMessageBytes(text)) {
-    return { ok: false, reason: "too_large", message: "Message too large." };
+    return { ok: false, reason: "too_large" };
   }
   let data: unknown;
   try {
     data = JSON.parse(text);
   } catch {
-    return { ok: false, reason: "bad_json", message: "Message is not valid JSON." };
+    return { ok: false, reason: "bad_json" };
   }
   const type =
     typeof data === "object" && data !== null && !Array.isArray(data)
       ? (data as { t?: unknown }).t
       : undefined;
   if (!(CLIENT_MSG_TYPES as readonly unknown[]).includes(type)) {
-    return { ok: false, reason: "unknown_type", message: "Unknown message type." };
+    return { ok: false, reason: "unknown_type" };
   }
   const parsed = clientMsgSchema.safeParse(data);
-  if (!parsed.success) {
-    const message = parsed.error.issues.map((issue) => issue.message).join(" ");
-    return { ok: false, reason: "invalid", message };
-  }
+  if (!parsed.success) return { ok: false, reason: "invalid" };
   return { ok: true, msg: parsed.data };
 }

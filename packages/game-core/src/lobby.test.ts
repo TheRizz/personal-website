@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { CLOSE_CODES, LOBBY_IDLE_TTL_MS, MAX_NAME_LENGTH, RECONNECT_GRACE_MS } from "./constants";
+import {
+  CLOSE_CODES,
+  LOBBY_IDLE_TTL_MS,
+  MAX_NAME_LENGTH,
+  MAX_SPECTATORS_PER_LOBBY,
+  RECONNECT_GRACE_MS,
+} from "./constants";
 import {
   closeConnection,
   createLobby,
@@ -57,6 +63,7 @@ class Sim {
   get ctx() {
     return {
       now: this.now,
+      spectators: this.spectators(),
       newToken: () => {
         const token = `00000000-0000-4000-8000-${String(this.issued.length + 1).padStart(12, "0")}`;
         this.issued.push(token);
@@ -459,6 +466,38 @@ describe("spectators", () => {
     expect(sim.socket(s).inbox).toHaveLength(inbox);
     // webSocketError then webSocketClose for the same socket: the second call does nothing.
     expect(sim.drop(s)).toEqual([]);
+  });
+
+  it("refuses spectators past the cap but always lets a seat holder back in", () => {
+    const [x, o] = sim.seatTwo();
+    const tokenX = sim.tokenOf(x);
+    for (let i = 0; i < MAX_SPECTATORS_PER_LOBBY; i++) sim.join(sim.connect(), `Fan ${i}`);
+    expect(sim.spectators()).toBe(MAX_SPECTATORS_PER_LOBBY);
+    sim.drop(x);
+
+    // X's seat is held, so a newcomer would be another spectator: refused and closed.
+    const lurker = sim.connect();
+    const seq = sim.lobby.seq;
+    expect(sim.send(lurker, { t: "join", name: "Lurker" })).toEqual([
+      {
+        type: "send",
+        connId: lurker,
+        msg: { t: "error", code: "LOBBY_FULL", message: "This lobby is full." },
+      },
+      { type: "close", connId: lurker, code: CLOSE_CODES.lobbyFull, reason: "Lobby full" },
+    ]);
+    expect(sim.role(lurker)).toBeNull();
+    expect(sim.lobby.seq).toBe(seq);
+    expect(sim.lastState(o).spectators).toBe(MAX_SPECTATORS_PER_LOBBY);
+
+    // X comes back with the token and gets the seat.
+    const x2 = sim.connect();
+    expect(sim.join(x2, "Ada", tokenX)).toMatchObject({ t: "joined", role: "X" });
+    expect(sim.lastState(o).players.X).toMatchObject({ connected: true, releaseAt: null });
+
+    // A free seat is never refused either.
+    sim.send(o, { t: "leave" });
+    expect(sim.join(sim.connect(), "Cleo")).toMatchObject({ t: "joined", role: "O" });
   });
 });
 
@@ -903,12 +942,13 @@ describe("views", () => {
     expect(stateMessage(sim.lobby, 3)).toEqual({ t: "state", state, seq: sim.lobby.seq });
   });
 
-  it("lobbySummary counts seats, including held ones", () => {
+  it("lobbySummary counts seats, including held ones, and connected seats", () => {
     expect(lobbySummary(sim.lobby, 0)).toEqual({
       code: CODE,
       game: "tictactoe",
       phase: "waiting",
       seatsTaken: 0,
+      connectedSeats: 0,
       spectators: 0,
     });
     const [x] = sim.seatTwo();
@@ -916,6 +956,7 @@ describe("views", () => {
     expect(lobbySummary(sim.lobby, 2)).toMatchObject({
       phase: "playing",
       seatsTaken: 2,
+      connectedSeats: 1,
       spectators: 2,
     });
   });

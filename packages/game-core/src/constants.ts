@@ -4,14 +4,21 @@ export const LOBBY_CODE_LENGTH = 6;
 export const MAX_NAME_LENGTH = 20;
 /** Max size of one client WebSocket frame, in UTF-8 bytes. */
 export const MAX_MESSAGE_BYTES = 4096;
-/** 2 players + up to 8 spectators; enforced by the Durable Object at upgrade time. */
+/**
+ * 2 players + up to 8 spectators. Spectators are capped when they join (MAX_SPECTATORS_PER_LOBBY);
+ * the Durable Object refuses upgrades only past this plus one spare socket per seat, so a player
+ * reclaiming a held seat can always connect, however many people are watching.
+ */
 export const MAX_SOCKETS_PER_LOBBY = 10;
+/** A join that would add a spectator past this is refused with LOBBY_FULL (close 4002). */
+export const MAX_SPECTATORS_PER_LOBBY = MAX_SOCKETS_PER_LOBBY - 2;
 /** Per socket; going over closes the socket with 1008. */
 export const MAX_MESSAGES_PER_SECOND = 10;
 /** How long a disconnected player's seat is held for them. */
 export const RECONNECT_GRACE_MS = 2 * 60_000;
 /** A lobby is deleted after this long without a client message. */
 export const LOBBY_IDLE_TTL_MS = 30 * 60_000;
+/** Lobby creates per client IP per minute. Must match the limiter's `limit` in wrangler.jsonc. */
 export const LOBBY_CREATE_LIMIT_PER_MINUTE = 10;
 
 /** WebSocket close codes used by the lobby. */
@@ -24,4 +31,6 @@ export const CLOSE_CODES = {
   seatTakenOver: 4000,
   /** The lobby idled out and was deleted. Clients must not auto-reconnect. */
   lobbyExpired: 4001,
+  /** Both seats are taken and the spectator cap is reached. Clients may retry later. */
+  lobbyFull: 4002,
 } as const;

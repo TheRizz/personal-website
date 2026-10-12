@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useId, type Ref } from "react";
 import { displayNameSchema, MAX_NAME_LENGTH } from "@site/game-core";
 import { eyebrow, inputClass } from "./ui";
 
@@ -17,11 +17,14 @@ export function NameField({
   onChange,
   error,
   autoFocus = false,
+  inputRef,
 }: {
   value: string;
   onChange: (value: string) => void;
   error: string | null;
   autoFocus?: boolean;
+  /** Lets the form focus the field when the name is rejected. */
+  inputRef?: Ref<HTMLInputElement>;
 }) {
   const id = useId();
   return (
@@ -30,6 +33,7 @@ export function NameField({
         Your name
       </label>
       <input
+        ref={inputRef}
         id={id}
         name="name"
         type="text"
@@ -47,7 +51,7 @@ export function NameField({
       />
       <p id={`${id}-hint`} className="mt-2 text-sm text-muted" aria-live="polite">
         {error ? (
-          <span className="text-red-600 dark:text-red-400">{error}</span>
+          <span className="text-red-700 dark:text-red-400">{error}</span>
         ) : (
           "Shown to the other player."
         )}

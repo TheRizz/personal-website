@@ -314,7 +314,7 @@ The Durable Object, protocol and lobby UI stay as they are.
 **GameLobby Durable Object lifecycle:**
 1. `init(game)`: store `{game, createdAt, status: "waiting"}` and set an alarm for `now + 30 min`.
 2. WebSocket connect: `ctx.acceptWebSocket(ws)` (hibernation). Attach `{seat, token}` with `ws.serializeAttachment`.
-3. `join`: if a valid `token` is sent, give back the same seat (reconnect). Otherwise take the first free seat. A third connection becomes a spectator, capped at 10 total sockets.
+3. `join`: if a valid `token` is sent, give back the same seat (reconnect). Otherwise take the first free seat. A third connection becomes a spectator. Spectators are capped at 8 when they join (2 players + 8 spectators = 10 sockets); upgrades are refused with `409` only past 12 sockets, so a player reclaiming a held seat can always get back in.
 4. `move`: run `validateMove`, then `applyMove`, save state to DO SQLite storage (so it survives hibernation), and broadcast `state`.
 5. Both players ask for a rematch: swap who goes first, reset the board, increment the round counter, and keep the score.
 6. Disconnect: mark the seat `disconnected` and keep it for 2 minutes so the player can reconnect. The other player is told.

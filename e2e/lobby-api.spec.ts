@@ -1,9 +1,12 @@
 import { test as base, expect, type APIResponse } from "@playwright/test";
 import {
   CLOSE_CODES,
+  LOBBY_CREATE_LIMIT_PER_MINUTE,
   MAX_MESSAGE_BYTES,
   MAX_SOCKETS_PER_LOBBY,
+  MAX_SPECTATORS_PER_LOBBY,
   RECONNECT_GRACE_MS,
+  SEATS,
   generateLobbyCode,
   isLobbyCode,
   type ServerMsg,
@@ -106,6 +109,7 @@ test.describe("HTTP API", () => {
       game: "tictactoe",
       phase: "waiting",
       seatsTaken: 0,
+      connectedSeats: 0,
       spectators: 0,
     });
   });
@@ -150,7 +154,9 @@ test.describe("HTTP API", () => {
     await expectApiError(await request.get("/api/nope"), 404, "not_found");
   });
 
-  test("the 11th create from one /64 within a minute is rate limited", async ({ request }) => {
+  test(`the ${LOBBY_CREATE_LIMIT_PER_MINUTE + 1}th create from one /64 within a minute is rate limited`, async ({
+    request,
+  }) => {
     test.setTimeout(60_000);
     // The local limiter uses clock-aligned 60 s windows: don't straddle a minute boundary.
     const intoMinute = Date.now() % 60_000;
@@ -158,7 +164,8 @@ test.describe("HTTP API", () => {
 
     // Different addresses inside one /64 share a limit.
     const prefix = uniqueIp().replace(/::1$/, "");
-    for (let i = 1; i <= 10; i++) await createLobby(request, `${prefix}::${i.toString(16)}`);
+    for (let i = 1; i <= LOBBY_CREATE_LIMIT_PER_MINUTE; i++)
+      await createLobby(request, `${prefix}::${i.toString(16)}`);
     const limited = await request.post("/api/lobbies", {
       headers: { "CF-Connecting-IP": `${prefix}:1:2:3:4` },
       data: { game: "tictactoe" },
@@ -216,12 +223,12 @@ test.describe("WebSocket handshake", () => {
     await expectApiError(await request.get(`/api/lobbies/${code}`), 404, "not_found");
   });
 
-  test(`the ${MAX_SOCKETS_PER_LOBBY + 1}th socket is rejected with 409`, async ({
-    request,
-    lobby,
-  }) => {
+  // One spare socket per seat on top of the cap, so a returning player always gets in.
+  const SOCKET_LIMIT = MAX_SOCKETS_PER_LOBBY + SEATS.length;
+
+  test(`the ${SOCKET_LIMIT + 1}th socket is rejected with 409`, async ({ request, lobby }) => {
     const sockets = [];
-    for (let i = 0; i < MAX_SOCKETS_PER_LOBBY; i++) sockets.push(await lobby.connect());
+    for (let i = 0; i < SOCKET_LIMIT; i++) sockets.push(await lobby.connect());
 
     await expect(LobbyClient.connect(lobby.code)).rejects.toThrow();
     await expectApiError(
@@ -237,6 +244,26 @@ test.describe("WebSocket handshake", () => {
       const client = await LobbyClient.connect(lobby.code);
       client.close();
     }).toPass({ timeout: 5_000 });
+  });
+
+  test("a full lobby refuses another spectator but lets a dropped player back in", async ({
+    lobby,
+  }) => {
+    const { x, o } = await startGame(lobby);
+    for (let i = 0; i < MAX_SPECTATORS_PER_LOBBY; i++) await lobby.join(`Fan ${i}`);
+    await o.client.next("state", (m) => m.state.spectators === MAX_SPECTATORS_PER_LOBBY);
+
+    x.client.close();
+    await o.client.next("state", (m) => m.state.players.X?.connected === false);
+
+    const lurker = await lobby.connect();
+    lurker.send({ t: "join", name: "Lurker" });
+    expect(await lurker.next("error")).toMatchObject({ code: "LOBBY_FULL" });
+    expect(await lurker.waitForClose()).toMatchObject({ code: CLOSE_CODES.lobbyFull });
+
+    const back = await lobby.join("Xena", x.joined.token!);
+    expect(back.joined).toMatchObject({ t: "joined", role: "X" });
+    expect(back.state.state.players.X).toMatchObject({ connected: true, releaseAt: null });
   });
 });
 
@@ -521,11 +548,13 @@ test.describe("WebSocket protocol", () => {
 
     await sleep(13_000);
 
+    // Woken sockets still count as open (the DO skips sockets that aren't).
     expect(await (await request.get(`/api/lobbies/${lobby.code}`)).json()).toEqual({
       code: lobby.code,
       game: "tictactoe",
       phase: "playing",
       seatsTaken: 2,
+      connectedSeats: 2,
       spectators: 1,
     });
     x.client.send("ping");

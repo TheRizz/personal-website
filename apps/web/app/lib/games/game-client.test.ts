@@ -185,6 +185,27 @@ describe("GameClient", () => {
     expect(client.getSnapshot()).toMatchObject({ connection: "open", attempt: 0 });
   });
 
+  it("ends a reconnect loop against a full lobby by saying it is full", async () => {
+    const { client, sockets, last } = setup({ lookup: { kind: "found", full: true } });
+    client.start();
+    // The first attempt joins and is refused by the server.
+    last().open();
+    last().receive({ t: "error", code: "LOBBY_FULL", message: "This lobby is full." });
+    last().drop(4002);
+    expect(client.getSnapshot()).toMatchObject({ connection: "reconnecting", lobbyFull: true });
+    // Later attempts are refused at the handshake (409 shows up as 1006).
+    for (let i = 0; i < 5; i++) {
+      await vi.advanceTimersByTimeAsync(10_000);
+      last().drop(1006);
+    }
+    expect(sockets).toHaveLength(6);
+    expect(client.getSnapshot()).toMatchObject({
+      connection: "failed",
+      lobbyFull: true,
+      lastError: { code: "LOBBY_FULL" },
+    });
+  });
+
   it("shows not found instead of reconnecting to a lobby that is gone", async () => {
     const { client, sockets, last } = setup({ lookup: { kind: "notFound" } });
     client.start();

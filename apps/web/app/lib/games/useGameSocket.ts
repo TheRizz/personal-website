@@ -36,6 +36,7 @@ export function useGameSocket(code: string, name: string) {
     attempt: snapshot.attempt,
     pendingCell: snapshot.pending?.cell ?? null,
     lastError: snapshot.lastError,
+    lobbyFull: snapshot.lobbyFull,
     send: client.send,
     play: client.play,
     rematch: client.rematch,
@@ -43,5 +44,3 @@ export function useGameSocket(code: string, name: string) {
     reconnect: client.reconnect,
   };
 }
-
-export type GameSocket = ReturnType<typeof useGameSocket>;
