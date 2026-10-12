@@ -300,7 +300,7 @@ from the nav yet.
 
 ## Phase 10: Owner-only authoring
 
-The owner drafts posts in a browser editor that only he can reach, with header
+The owner drafts posts in a browser editor that only they can reach, with header
 sizes, bold, italics and image sections, and publishes them as Markdown through
 a pull request. Design: §4.9, [ADR-0004](./adr/0004-owner-only-admin-access.md)
 and [ADR-0005](./adr/0005-in-browser-authoring.md). Setup clicks: hosting guide

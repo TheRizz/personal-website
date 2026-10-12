@@ -20,7 +20,7 @@ Three facts from the Cloudflare docs shape the choice:
 
 ### A. Cloudflare Access path app, plus a JWT check in the Worker on every admin request
 - **Cost:** $0. Zero Trust Free covers 50 users, and the owner uses 1 seat. Onboarding asks for a payment method but doesn't charge it.
-- **How:** one self-hosted app with two paths, `ry-mart.com/admin` and `ry-mart.com/api/admin`, and an Allow policy for the owner's email. The owner signs in with the Cloudflare login he already uses (Google), so there is no Google Cloud setup. The Worker then checks the `Cf-Access-Jwt-Assertion` header with `jose` (RS256, issuer, audience, `type: app`, owner email), so a request that slips past Access still fails.
+- **How:** one self-hosted app with two paths, `ry-mart.com/admin` and `ry-mart.com/api/admin`, and an Allow policy for the owner's email. The owner signs in with the Cloudflare login they already use (Google), so there is no Google Cloud setup. The Worker then checks the `Cf-Access-Jwt-Assertion` header with `jose` (RS256, issuer, audience, `type: app`, owner email), so a request that slips past Access still fails.
 - **Effort:** about 60 lines of verifier plus tests. Login UI, MFA, sessions, logout and audit logs come from Cloudflare.
 - **Cons:** a vendor dashboard holds part of the config. Not tested end to end yet: one real request after setup must confirm the header reaches a Worker with Static Assets. There is deliberately no cookie fallback (decision 3).
 
