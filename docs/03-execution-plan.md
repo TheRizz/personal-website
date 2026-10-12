@@ -335,10 +335,10 @@ one-click publishing.
 - [x] A card on file and the R2 billing alert (§2.8 step 5).
 - [x] The GitHub default branch is `main` (§2.4 step 1).
 - [x] Hosting guide §2.7: turn on Zero Trust Free and create the "Site admin" Access app (paths `admin` and `api/admin`, the Cloudflare login, owner-only policy, 24-hour sessions, SameSite Lax, HttpOnly, Binding cookie, empty CORS).
-- [ ] Hosting guide §2.8: create the D1 database `blog` and the private bucket `blog-backups`. Finish §2.2 (`photos` and `photos.ry-mart.com`) if it isn't done. Add the `nosniff` Transform Rule.
-- [ ] Hosting guide §2.9: `wrangler secret put OWNER_EMAIL`. Add Account · D1 · Edit to the CI token (§2.3). Create the backup-only D1 token and the R2 key scoped to `blog-backups`.
+- [ ] Hosting guide §2.8: create the D1 database `blog` (done 2026-10-12) and the private bucket `blog-backups`. Finish §2.2 (`photos` and `photos.ry-mart.com`) if it isn't done. Add the `nosniff` Transform Rule.
+- [ ] Hosting guide §2.9: `wrangler secret put OWNER_EMAIL` (done 2026-10-12). Add Account · D1 · Edit to the CI token (§2.3). Create the backup-only D1 token and the R2 key scoped to `blog-backups`.
 - [ ] Confirm the `main` environment only deploys from `main` (§2.4 check).
-- [ ] Send back the team domain, the AUD tag and the D1 `database_id` (none is secret), so a follow-up commit fills them in (Access vars in Step 10.1, the `DB` binding in Step 10.4). The team domain (`tight-boat-6333`) and AUD tag arrived on 2026-10-12 and are in `wrangler.jsonc`; the D1 id is still to come.
+- [x] Send back the team domain, the AUD tag and the D1 `database_id` (none is secret), so a follow-up commit fills them in (Access vars in Step 10.1, the `DB` binding in Step 10.4). The team domain (`tight-boat-6333`) and AUD tag arrived on 2026-10-12 and are in `wrangler.jsonc`, and the D1 id arrived the same day and is in the `DB` binding.
 
 **Done when:** every ✅ check in hosting guide §2.7–2.9 passes, `curl -sI https://ry-mart.com/admin` returns `302` to `<team>.cloudflareaccess.com`, and the team domain, AUD tag and D1 id have been sent back.
 
@@ -368,13 +368,22 @@ one-click publishing.
 **Done when:** e2e signs in with the test token and sees the empty draft list. A test write through the wrapper passes the gate, and the same write without the wrapper gets 404. The prerendered post HTML is unchanged. axe shows no new violations.
 
 ### Step 10.4: Drafts API on D1
-- [ ] Migration `0001` (`drafts`, `draft_revisions`, `images`, §4.9.5) and the `DB` binding.
-- [ ] Endpoints: list, create, get, autosave `PUT` with `baseRev` (409 on a stale rev), discard, revisions, restore. Validate with `postFrontmatter.partial()` and a 512 KB body cap. Bound parameters only, and every batch statement guarded.
-- [ ] Revisions: every `publish` revision kept, others capped at 50, a `conflict` snapshot before an overwrite.
-- [ ] `deploy.yml` runs `wrangler d1 migrations apply blog --remote` before `wrangler deploy`. Migrations are expand-only, because `wrangler rollback` doesn't roll back D1. E2E applies them `--local`.
-- [ ] `backup.yml`: nightly `wrangler d1 export`, uploaded into `blog-backups` with the S3 API, in the `main` environment, with the backup-only credentials (hosting guide §2.9), printing no content.
+- [x] Migration `0001` (`drafts`, `draft_revisions`, `images`, §4.9.5) and the `DB` binding.
+- [x] Endpoints: list, create, get, autosave `PUT` with `baseRev` (409 on a stale rev), discard, revisions, restore. Validate with `postFrontmatter.partial()` and a 512 KB body cap. Bound parameters only, and every batch statement guarded.
+- [x] Revisions: every `publish` revision kept, others capped at 50, a `conflict` snapshot before an overwrite.
+- [x] `deploy.yml` runs `wrangler d1 migrations apply blog --remote` before `wrangler deploy`. Migrations are expand-only, because `wrangler rollback` doesn't roll back D1. E2E applies them `--local`.
+- [x] `backup.yml`: nightly `wrangler d1 export`, uploaded into `blog-backups` with the S3 API, in the `main` environment, with the backup-only credentials (hosting guide §2.9), printing no content.
 
 **Done when:** unit tests cover a successful save, a stale save (409, row unchanged), the revision cap and the conflict snapshot. E2E creates, saves and reloads a draft. The production migration applies from the deploy job. The first nightly backup object appears in `blog-backups`, and the run log has no draft text.
+
+> **Built (Step 10.4).** A save asks for a snapshot with `revision: "interval" | "manual" |
+> "conflict"`; the editor's Overwrite re-sends with the rev from the 409 and `"conflict"`, which
+> keeps the overwritten version in the same batch as the UPDATE. The other snapshots and the
+> pruning run only after the UPDATE succeeded, so a stale save never writes a revision. Restore
+> takes `{baseRev}` and is a 409 when stale. Discard is refused while a publish is open. Unit tests
+> run the real migrations on Node's built-in SQLite (`worker/d1-fake.ts`). `backup.yml` skips with
+> a warning until the backup credentials from §2.9 exist. `deploy.yml` now fails if `OWNER_EMAIL`
+> is missing.
 
 ### Step 10.5: Editor
 - [ ] TipTap, lazy-loaded in `/admin/drafts/:id`. Toolbar: H2, H3, H4, bold, italic, code, link, lists, quote, code block, rule. Raw Markdown tab. Markdown paste.

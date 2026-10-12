@@ -40,6 +40,17 @@
   "workers_dev": false,
   "preview_urls": false,
 
+  // Drafts for the editor (design doc §4.9.5). The id isn't secret. deploy.yml applies the
+  // migrations before each deploy, and e2e applies them locally.
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "blog",
+      "database_id": "adb4e0b8-b513-464e-bff6-4c0faab3dfa0",
+      "migrations_dir": "migrations",
+    },
+  ],
+
   // Cloudflare Access for the admin area (hosting guide §2.7); neither value is secret. If either
   // is empty or malformed, the owner gate refuses every admin request. The owner's e-mail is the
   // OWNER_EMAIL secret, never a var.
