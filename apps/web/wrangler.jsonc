@@ -7,10 +7,11 @@
   "observability": { "enabled": true },
   "upload_source_maps": true,
 
-  // Static assets come from the Vite build; only /api/* reaches the Worker first.
+  // Static assets come from the Vite build. The API and the admin area reach the Worker first, so
+  // the owner gate sees them (design doc §4.9.1).
   "assets": {
     "binding": "ASSETS",
-    "run_worker_first": ["/api/*"],
+    "run_worker_first": ["/api/*", "/admin", "/admin/*"],
     // Serve prerendered blog/index.html at /blog (no trailing-slash redirect).
     "html_handling": "drop-trailing-slash",
   },
@@ -35,7 +36,15 @@
   // has a proxied placeholder DNS record and a redirect rule to the bare domain.
   "routes": [{ "pattern": "ry-mart.com", "custom_domain": true }],
 
-  // Keep <subdomain>.workers.dev as the fallback URL and allow PR preview URLs.
-  "workers_dev": true,
-  "preview_urls": true,
+  // Cloudflare Access covers only ry-mart.com, so no other hostname may serve this Worker.
+  "workers_dev": false,
+  "preview_urls": false,
+
+  // Cloudflare Access for the admin area (hosting guide §2.7); neither value is secret. Empty
+  // until the owner finishes Step 10.0, and the owner gate refuses every admin request while they
+  // are. The owner's e-mail is the OWNER_EMAIL secret, never a var.
+  "vars": {
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": "",
+  },
 }

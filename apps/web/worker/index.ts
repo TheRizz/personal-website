@@ -1,11 +1,22 @@
 import { createRequestHandler } from "react-router";
+import { themeScript } from "../app/components/ThemeToggle";
+import { handleAdmin } from "./admin";
+import { requireOwner, withAdminHeaders } from "./admin-auth";
 import { handleApi } from "./api";
+import {
+  SECURITY_HEADERS,
+  contentSecurityPolicy,
+  createNonce,
+  scriptHashSource,
+} from "./security-headers";
 
 export { GameLobby } from "./game-lobby";
 
 declare module "react-router" {
   export interface AppLoadContext {
     cloudflare: { env: Env; ctx: ExecutionContext };
+    /** CSP nonce for this render's inline scripts. Absent while prerendering. */
+    cspNonce?: string;
   }
 }
 
@@ -18,15 +29,48 @@ const requestHandler = createRequestHandler(
 
 const noStore = { "Cache-Control": "no-store" };
 
+// The theme script in root.tsx is allowed by its hash, so the layout needs no nonce.
+let themeScriptHash: Promise<string> | undefined;
+
+/** Adds the security headers, with a CSP that allows only this response's nonce (and the theme). */
+async function withSecurityHeaders(request: Request, response: Response, nonce: string) {
+  // A WebSocket upgrade must be returned as it is.
+  if (response.status === 101 || response.webSocket) return response;
+  // The dev server injects inline scripts (HMR) that carry no nonce.
+  if (import.meta.env.DEV) return response;
+
+  const url = new URL(request.url);
+  themeScriptHash ??= scriptHashSource(themeScript);
+  const policy = contentSecurityPolicy({
+    inlineScripts: [`'nonce-${nonce}'`, await themeScriptHash],
+    socketOrigin: `${url.protocol === "https:" ? "wss" : "ws"}://${url.host}`,
+  });
+  const result = new Response(response.body, response);
+  for (const [name, value] of Object.entries(SECURITY_HEADERS)) result.headers.set(name, value);
+  result.headers.set("Content-Security-Policy", policy);
+  return result;
+}
+
+async function route(request: Request, env: Env, ctx: ExecutionContext, nonce: string) {
+  const renderPage = () => requestHandler(request, { cloudflare: { env, ctx }, cspNonce: nonce });
+
+  // The owner gate runs before anything else, so no admin path can be reached around it.
+  const owner = await requireOwner(request, env);
+  if (owner instanceof Response) return owner;
+  if (owner) return withAdminHeaders(await handleAdmin(request, owner, renderPage));
+
+  const { pathname } = new URL(request.url);
+  if (pathname === "/api/health") {
+    return Response.json({ ok: true, version: __APP_VERSION__ }, { headers: noStore });
+  }
+  if (pathname.startsWith("/api/")) return handleApi(request, env);
+  return renderPage();
+}
+
 export default {
   async fetch(request, env, ctx) {
-    const { pathname } = new URL(request.url);
-
-    if (pathname === "/api/health") {
-      return Response.json({ ok: true, version: __APP_VERSION__ }, { headers: noStore });
-    }
-    if (pathname.startsWith("/api/")) return handleApi(request, env);
-
-    return requestHandler(request, { cloudflare: { env, ctx } });
+    const nonce = createNonce();
+    const response = await route(request, env, ctx, nonce);
+    return withSecurityHeaders(request, response, nonce);
   },
 } satisfies ExportedHandler<Env>;

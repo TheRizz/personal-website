@@ -3,6 +3,10 @@ import { MAX_MESSAGE_BYTES, MAX_NAME_LENGTH } from "./constants";
 import { GAME_IDS, type GameId } from "./games";
 import type { GameStatus } from "./game";
 
+// Zod's optional JIT probes `new Function`, which the site's CSP blocks and reports as a
+// violation. Parsing works the same without it.
+z.config({ jitless: true });
+
 // C0/C1 controls, line/paragraph separators and bidi marks/embeddings/overrides/isolates: they
 // break layout or can disguise a name. Zero-width joiners stay allowed because emoji need them.
 const FORBIDDEN_NAME_CHARS = /[\p{Cc}\p{Zl}\p{Zp}\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/u;

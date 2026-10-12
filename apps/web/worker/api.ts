@@ -5,7 +5,8 @@ const noStore = { "Cache-Control": "no-store" };
 const MAX_CODE_ATTEMPTS = 3;
 const LOBBY_PATH = /^\/api\/lobbies\/([^/]+)(\/ws)?$/;
 
-function jsonError(
+/** The JSON error shape every /api route uses (design doc §4.5). Never cached. */
+export function jsonError(
   status: number,
   code: string,
   message: string,
@@ -17,7 +18,8 @@ function jsonError(
   );
 }
 
-function methodNotAllowed(allow: string): Response {
+/** 405 with the allowed methods. */
+export function methodNotAllowed(allow: string): Response {
   return jsonError(405, "method_not_allowed", `Use ${allow}.`, { Allow: allow });
 }
 

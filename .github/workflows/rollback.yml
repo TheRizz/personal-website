@@ -22,13 +22,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: main
+    # CLOUDFLARE_API_TOKEN is set only on the steps that need it, not while installing.
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check Cloudflare credentials
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           DEPLOY_ENVIRONMENT: main
           TOKEN_IN_VARIABLES: ${{ vars.CLOUDFLARE_API_TOKEN != '' }}
         run: bash .github/scripts/check-cloudflare-env.sh
@@ -41,6 +42,7 @@ jobs:
       - name: Roll back
         working-directory: apps/web
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           VERSION_ID: ${{ inputs.version-id }}
           REASON: ${{ inputs.reason }}
         run: pnpm exec wrangler rollback $VERSION_ID --yes --message "$REASON"
