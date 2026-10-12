@@ -4,8 +4,11 @@ export default [
   index("routes/home.tsx"),
   route("blog", "routes/blog.tsx"),
   route("blog/:slug", "routes/blog.$slug.tsx"),
+  route("games", "routes/games.tsx"),
+  route("games/tictactoe", "routes/games.tictactoe.tsx"),
+  route("games/tictactoe/:code", "routes/games.tictactoe.$code.tsx"),
   // Sections that are built in later phases share one placeholder page.
-  ...["resume", "snippets", "photos", "games", "search"].map((path) =>
+  ...["resume", "snippets", "photos", "search"].map((path) =>
     route(path, "routes/coming-soon.tsx", { id: `coming-soon-${path}` }),
   ),
   route("*", "routes/not-found.tsx"),

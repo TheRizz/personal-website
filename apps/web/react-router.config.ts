@@ -1,7 +1,16 @@
 import { readFileSync } from "node:fs";
 import type { Config } from "@react-router/dev/config";
 
-const STATIC_ROUTES = ["/", "/blog", "/resume", "/snippets", "/photos", "/games", "/search"];
+const STATIC_ROUTES = [
+  "/",
+  "/blog",
+  "/resume",
+  "/snippets",
+  "/photos",
+  "/games",
+  "/games/tictactoe",
+  "/search",
+];
 
 export default {
   ssr: true,

@@ -11,6 +11,7 @@ them on the vendor pages before you buy.
 | Domain name (e.g. `ryanmartinez.dev` / `.com`) | Cloudflare Registrar (sells at cost) | **~$10.46/yr for .com**, ~$12/yr for .dev | **Yes**, the only thing you pay for |
 | Cloudflare account, Workers **Free** plan | Cloudflare | $0 | Yes |
 | Durable Objects, SQLite-backed (game lobbies) | Cloudflare, included in Workers Free | $0 | Yes |
+| Workers Rate Limiting binding (lobby creation) | Cloudflare | $0 | Yes, no setup (see §2.5) |
 | R2 object storage (photos), 10 GB free | Cloudflare | $0 (a payment method may be needed to turn R2 on) | Yes, for photos |
 | GitHub repo and Actions | GitHub Free | $0 | Yes |
 | Web Analytics, DNS, TLS certificates, DDoS protection | Cloudflare | $0 | Included |
@@ -80,6 +81,8 @@ check you can run to confirm it worked.
    - For `www`, don't add a Worker route. Add a proxied DNS record instead (**DNS → Records**: type `AAAA`, name `www`, IPv6 `100::`, proxy on). Then create a redirect rule (**Rules → Redirect Rules**) with a wildcard pattern: request URL `https://www.<yourdomain>/*`, target URL `https://<yourdomain>/${1}`, status `301`, **Preserve query string** on. Turn on **SSL/TLS → Edge Certificates → Always Use HTTPS** so `http://` requests are upgraded before the rule runs.
 2. Deploy once (through CI or `wrangler deploy`). Cloudflare creates the DNS records and certificate automatically.
 3. ✅ Check: `curl -I https://<yourdomain>` returns `200` with a valid certificate.
+4. The same deploy creates the `LOBBY_CREATE_LIMITER` rate-limit binding from `wrangler.jsonc` (namespace `1001`, 10 requests per 60 s per client IP). There is nothing to set up in the dashboard; the namespace is just a number that must be unique in the account. Keep `limit` equal to `LOBBY_CREATE_LIMIT_PER_MINUTE` in `game-core`.
+5. ✅ Check: the first deploy on Workers Free accepts the binding (the deploy output lists it), and the 429 check in §5 passes. If the binding is refused, the fallback is a WAF rate-limit rule (design doc §4.5).
 
 ### 2.6 Optional extras (free)
 - **Email Routing:** forward `hello@<yourdomain>` to your personal inbox.
@@ -93,14 +96,18 @@ check you can run to confirm it worked.
 
 | Tool | Version | Install |
 |------|---------|---------|
-| Node.js | 22 LTS | `nvm install 22` (pin it in `.nvmrc`) |
-| pnpm | 9.x | `corepack enable` |
+| Node.js | 24 | `nvm install 24` (pinned in `.nvmrc`) |
+| pnpm | 12.x | `corepack enable` (version pinned in `package.json`) |
 | Wrangler | 4.x | dev dependency, run with `pnpm wrangler` |
 | Playwright browsers | match the package | `pnpm exec playwright install chromium` |
 
 `pnpm dev` runs the React Router dev server with the Cloudflare Vite plugin.
 Workers, Durable Objects and WebSockets run locally in `workerd`, the same
 runtime as production.
+
+`pnpm e2e` runs the Playwright tests in Chromium against the production build
+served by `vite preview` (also `workerd`) on port 4173. Install the browser once
+with `pnpm exec playwright install chromium`.
 
 ---
 
@@ -115,7 +122,7 @@ runtime as production.
   ├─ unit tests (vitest, game-core, worker)    ├─ wrangler deploy
   ├─ build content (schema validation)         ├─ smoke test (curl pages, /api/health,
   ├─ build app, check index size budget        │   create lobby + WS handshake)
-  ├─ e2e (Playwright vs local wrangler dev)    └─ on failure → wrangler rollback + fail job
+  ├─ e2e (Playwright vs vite preview)          └─ on failure → wrangler rollback + fail job
   └─ preview: wrangler versions upload
         --preview-alias pr-<n>  → comment URL  uptime.yml (cron */30)
                                                 └─ curl / and /api/health → open issue on fail
@@ -124,6 +131,11 @@ runtime as production.
 `cloudflare/wrangler-action` runs Wrangler in CI. Pin every action to a commit
 SHA, set `permissions:` to the minimum each job needs, and use
 `concurrency: deploy-production` so two deploys never overlap.
+
+`ci.yml` runs the Playwright e2e suite after `pnpm build`. It installs Chromium,
+serves that build with `vite preview` on port 4173 (`CI=true` stops it building
+again) and uploads `playwright-report/` as an artifact when a test fails. The
+preview job is not built yet.
 
 ---
 
@@ -149,7 +161,7 @@ infrastructure change.
 - [ ] Moves show up on both screens, out-of-turn clicks are rejected, and wins and draws are detected
 - [ ] Refreshing a tab mid-game reconnects to the same seat
 - [ ] Rematch swaps who goes first and the score carries over
-- [ ] A third browser joining shows spectator mode, or "full" if spectators are off
+- [ ] A third browser joining shows spectator mode. With 8 spectators watching, the next visitor sees "This game is full".
 - [ ] An invalid code shows a friendly "Lobby not found" message
 - [ ] Creating more than 10 lobbies a minute from one IP returns 429
 
@@ -173,4 +185,6 @@ infrastructure change.
 | Roll back production | `pnpm wrangler rollback` or the GitHub Actions "Rollback" `workflow_dispatch` |
 | See errors | Cloudflare dashboard → Workers → `site` → Logs / Observability |
 | Rotate the API token | Create a new token, update the GitHub environment secret, revoke the old token |
+| Run the e2e tests locally | `pnpm e2e`. It builds, serves the build on port 4173 and runs Playwright. If a server is already running on 4173, it reuses that server and skips the build, so stop it or rebuild after changing code. Set `E2E_PORT` to use another port. |
+| Debug a failed e2e run in CI | Download the `playwright-report` artifact from the run and open it with `pnpm exec playwright show-report <folder>`. Failed tests keep a trace. |
 | Free limit reached | Workers & Pages → Plans → Workers Paid ($5/month). No code change needed. |

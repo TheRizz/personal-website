@@ -7,7 +7,6 @@ const SECTIONS: Record<string, { title: string; description: string }> = {
   "/resume": { title: "Resume", description: "Work history, skills and projects." },
   "/snippets": { title: "Snippets", description: "Small pieces of code worth keeping." },
   "/photos": { title: "Photos", description: "A gallery of photos, grouped into albums." },
-  "/games": { title: "Games", description: "Small multiplayer games you can play with a friend." },
   "/search": { title: "Search", description: "Search posts, snippets and photos." },
 };
 

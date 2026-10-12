@@ -5,9 +5,9 @@ site-wide tags and search, and a 1v1 WebSocket game lobby (tic-tac-toe). It's
 built with React and runs on Cloudflare's free tier. It deploys through GitHub
 Actions, and the only running cost is the domain (about $10–12 per year).
 
-> **Status:** the scaffold, deploy pipeline, site shell and blog are built (most of
-> Phase 1, Step 2.1 and a first cut of Step 3.2). Resume, snippets, photos, search and
-> games are placeholder pages.
+> **Status:** the scaffold, deploy pipeline, site shell, blog and games are built (most of
+> Phase 1, Step 2.1, a first cut of Step 3.2, and Phases 7–8). Tic-tac-toe is playable.
+> Resume, snippets, photos and search are placeholder pages.
 > The visual style is modelled on [godobject.dev](https://godobject.dev/).
 
 ## Quickstart
@@ -19,9 +19,15 @@ pnpm install
 pnpm dev          # http://localhost:5173, drafts included
 pnpm build        # builds content, then prerenders every page
 pnpm --filter web preview   # serves the production build on the Workers runtime
+pnpm e2e          # builds, serves on :4173 (or reuses a server already there), runs Playwright
 ```
 
-Checks that CI runs: `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`, `pnpm build`.
+Checks that CI runs: `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`, `pnpm build`,
+`pnpm e2e`. Before the first `pnpm e2e`, install the browser with
+`pnpm exec playwright install chromium`.
+
+To play, open `/games`: create a tic-tac-toe lobby and send the code or invite link to a
+friend. The game design is in [design doc §4.5](docs/01-system-design.md#45-game-service-design).
 
 ### Writing a post
 

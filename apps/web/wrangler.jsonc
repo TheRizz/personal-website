@@ -21,6 +21,16 @@
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameLobby"] }],
 
+  // POST /api/lobbies is limited per client IP. Config can't import game-core, so `limit` must be
+  // kept equal to LOBBY_CREATE_LIMIT_PER_MINUTE there (the unit and e2e tests use that constant).
+  "ratelimits": [
+    {
+      "name": "LOBBY_CREATE_LIMITER",
+      "namespace_id": "1001",
+      "simple": { "limit": 10, "period": 60 },
+    },
+  ],
+
   // Production domain (hosting guide §2.5). www never reaches the Worker: it
   // has a proxied placeholder DNS record and a redirect rule to the bare domain.
   "routes": [{ "pattern": "ry-mart.com", "custom_domain": true }],

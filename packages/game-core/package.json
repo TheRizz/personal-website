@@ -1,0 +1,17 @@
+{
+  "name": "@site/game-core",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc"
+  },
+  "dependencies": {
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "fast-check": "^4.10.2"
+  }
+}
