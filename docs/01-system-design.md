@@ -268,7 +268,7 @@ In that case the Worker generates a new code (at most 3 attempts).
 |--------|------|---------|----------|
 | `POST` | `/api/lobbies` | `{game: "tictactoe"}` | `201 {code, game, expiresAt}` · `429` when rate limited |
 | `GET` | `/api/lobbies/:code` | – | `200 {code, game, status: waiting\|playing\|finished, seatsTaken}` · `404` |
-| `GET` | `/api/lobbies/:code/ws` | `Upgrade: websocket` | `101` · `404` unknown lobby · `409` full |
+| `GET` | `/api/lobbies/:code/ws` | `Upgrade: websocket` | `101` · `404` unknown lobby (a full lobby refuses the `join` message, not the upgrade) |
 | `GET` | `/api/health` | – | `200 {ok: true, version}` |
 
 **WebSocket protocol** (JSON messages, validated with zod on both ends, 4 KB max per message):
@@ -314,7 +314,7 @@ The Durable Object, protocol and lobby UI stay as they are.
 **GameLobby Durable Object lifecycle:**
 1. `init(game)`: store `{game, createdAt, status: "waiting"}` and set an alarm for `now + 30 min`.
 2. WebSocket connect: `ctx.acceptWebSocket(ws)` (hibernation). Attach `{seat, token}` with `ws.serializeAttachment`.
-3. `join`: if a valid `token` is sent, give back the same seat (reconnect). Otherwise take the first free seat. A third connection becomes a spectator. Spectators are capped at 8 when they join (2 players + 8 spectators = 10 sockets); upgrades are refused with `409` only past 12 sockets, so a player reclaiming a held seat can always get back in.
+3. `join`: if a valid `token` is sent, give back the same seat (reconnect). Otherwise take the first free seat. A third connection becomes a spectator. Spectators are capped at 8 when they join (2 players + 8 spectators = 10 sockets). Upgrades are never refused, so a player reclaiming a held seat can always get back in: a socket that hasn't sent `join` within 10 seconds is closed (`4003`), and past 2 such sockets the oldest is closed to make room.
 4. `move`: run `validateMove`, then `applyMove`, save state to DO SQLite storage (so it survives hibernation), and broadcast `state`.
 5. Both players ask for a rematch: swap who goes first, reset the board, increment the round counter, and keep the score.
 6. Disconnect: mark the seat `disconnected` and keep it for 2 minutes so the player can reconnect. The other player is told.

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { isSeat, type PublicState, type Role } from "@site/game-core";
 import type { ConnectionStatus } from "~/lib/games/client-state";
+import { focusIsLost } from "~/lib/games/focus";
 import { useGameSocket } from "~/lib/games/useGameSocket";
 import { announcement, statusHeadline } from "~/lib/games/view";
 import { ConnectionBadge, ConnectionNotice } from "./ConnectionBadge";
@@ -15,15 +16,26 @@ import { Toast } from "./Toast";
 import { card, ghostButton, secondaryButton } from "./ui";
 import { WaitingPanel } from "./WaitingPanel";
 
-/** Everything below the page heading for one live lobby. */
-export function GameScreen({ code, name }: { code: string; name: string }) {
+/**
+ * Everything below the page heading for one live lobby. `focusOnMount` is set when the player's
+ * own action (Join game, Try again) put this screen in place of the focused button.
+ */
+export function GameScreen({
+  code,
+  name,
+  focusOnMount = false,
+}: {
+  code: string;
+  name: string;
+  focusOnMount?: boolean;
+}) {
   const game = useGameSocket(code, name);
   const navigate = useNavigate();
   const announced = useAnnouncement(game.state, game.role);
   const badge = useRef<HTMLSpanElement>(null);
-  // Set when a button that goes away on success (Reconnect, Watch here, Take the empty seat) is
-  // pressed, so focus can land on the badge instead of falling back to <body>.
-  const refocus = useRef(false);
+  // Set when a button that goes away on success (Reconnect, Watch here, Take the empty seat, or the
+  // one that mounted this screen) is pressed, so focus can land on the badge instead of <body>.
+  const refocus = useRef(focusOnMount);
 
   function reconnect() {
     refocus.current = true;
@@ -106,9 +118,13 @@ export function GameScreen({ code, name }: { code: string; name: string }) {
   );
 }
 
-/** True when the focused element was removed (focus fell back to <body>). */
-function focusIsLost(): boolean {
-  return document.activeElement === null || document.activeElement === document.body;
+/** Scrolls `element` the least distance that shows all of it, unless it already is. */
+function revealWhole(element: HTMLElement | null) {
+  if (!element) return;
+  const { top, bottom } = element.getBoundingClientRect();
+  if (top >= 0 && bottom <= window.innerHeight) return;
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  element.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
 }
 
 /** The latest screen-reader announcement for changes to the lobby (see `announcement`). */
@@ -170,17 +186,16 @@ function Match({
   const seat = isSeat(role) ? role : null;
   const connected = connection === "open";
   const boardRef = useRef<HTMLDivElement>(null);
+  const rematchRef = useRef<HTMLDivElement>(null);
   const round = useRef(state.round);
 
   // Once the game starts, bring the whole board into view (on phones it starts below the fold).
+  useEffect(() => revealWhole(boardRef.current), []);
+
+  // When a round ends, and when a rematch request adds a line, keep "Play again" in view too.
   useEffect(() => {
-    const board = boardRef.current;
-    if (!board) return;
-    const { top, bottom } = board.getBoundingClientRect();
-    if (top >= 0 && bottom <= window.innerHeight) return;
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    board.scrollIntoView({ block: "nearest", behavior: reduced ? "auto" : "smooth" });
-  }, []);
+    if (state.phase === "finished") revealWhole(rematchRef.current);
+  }, [state.phase, state.rematch.X, state.rematch.O]);
 
   // A new round removes the rematch controls; keep keyboard focus on the board.
   useEffect(() => {
@@ -214,10 +229,10 @@ function Match({
         />
       </div>
       {state.phase === "finished" && (
-        <RematchControls state={state} role={role} disabled={!connected} onRematch={onRematch} />
+        <div ref={rematchRef}>
+          <RematchControls state={state} role={role} disabled={!connected} onRematch={onRematch} />
+        </div>
       )}
-      {/* Below the board, so it appearing mid-turn can't shift a cell under the player's finger. */}
-      <DisconnectNotice state={state} role={role} />
     </div>
   );
 }

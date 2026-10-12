@@ -124,7 +124,7 @@ function connectLobby(request: Request, code: string, env: Env): Promise<Respons
     );
   }
   if (!isLobbyCode(code)) return jsonError(404, "not_found", "Lobby not found.");
-  // The DO answers 404 (unknown lobby), 409 (full) or 101 with the socket.
+  // The DO answers 404 (unknown lobby) or 101 with the socket.
   return env.GAME_LOBBY.getByName(code).fetch(new Request("https://lobby/ws", request));
 }
 

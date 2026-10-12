@@ -1,5 +1,6 @@
 import { SEATS, type PublicState, type Role, type Seat } from "@site/game-core";
 import { playerName } from "~/lib/games/view";
+import { DisconnectStatus } from "./DisconnectNotice";
 import { Mark } from "./Marks";
 
 function PlayerCard({
@@ -48,7 +49,10 @@ function PlayerCard({
   );
 }
 
-/** Both players with their mark, score, connection dot and whose turn it is. */
+/**
+ * Both players with their mark, score, connection dot and whose turn it is, then the round and
+ * score line, or who is disconnected and for how long their seat is held.
+ */
 export function PlayerBar({ state, role }: { state: PublicState; role: Role | null }) {
   const turn =
     state.phase === "playing" && state.result.kind === "playing" ? state.result.turn : null;
@@ -65,10 +69,14 @@ export function PlayerBar({ state, role }: { state: PublicState; role: Role | nu
           />
         ))}
       </ul>
-      <p className="mt-2 text-center text-[0.8rem] tracking-[0.02em] text-muted">
+      <DisconnectStatus
+        state={state}
+        role={role}
+        className="mt-2 text-center text-[0.8rem] tracking-[0.02em] text-muted"
+      >
         Round {state.round} • {state.score.draws} {state.score.draws === 1 ? "draw" : "draws"}
         {state.spectators > 0 && ` • ${state.spectators} watching`}
-      </p>
+      </DisconnectStatus>
     </div>
   );
 }

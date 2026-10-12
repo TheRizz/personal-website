@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { data, redirect } from "react-router";
 import { isLobbyCode, MAX_SPECTATORS_PER_LOBBY } from "@site/game-core";
 import { PageHeading } from "~/components/PageHeading";
@@ -7,6 +7,7 @@ import { LobbyGonePanel } from "~/components/games/LobbyGonePanel";
 import { NamePrompt } from "~/components/games/NamePrompt";
 import { card, secondaryButton } from "~/components/games/ui";
 import { lookupLobby, type LobbyLookup } from "~/lib/games/api";
+import { focusIsLost } from "~/lib/games/focus";
 import { lobbyPath } from "~/lib/games/links";
 import { loadToken, saveName, useSavedName } from "~/lib/games/storage";
 import { pageMeta } from "~/lib/meta";
@@ -41,6 +42,8 @@ export const meta: Route.MetaFunction = ({ params }) => [
 
 export default function TicTacToeGame({ loaderData: { code } }: Route.ComponentProps) {
   const savedName = useSavedName();
+  // "Join game" replaces the form, and the button with it: focus follows to what comes next.
+  const [joining, setJoining] = useState(false);
 
   return (
     <>
@@ -51,9 +54,15 @@ export default function TicTacToeGame({ loaderData: { code } }: Route.ComponentP
         // Server render: the name and the lobby are only known in the browser.
         <Placeholder text="Loading game…" />
       ) : savedName === null ? (
-        <NamePrompt code={code} onSubmit={saveName} />
+        <NamePrompt
+          code={code}
+          onSubmit={(name) => {
+            setJoining(true);
+            saveName(name);
+          }}
+        />
       ) : (
-        <LobbyGate key={code} code={code} name={savedName} />
+        <LobbyGate key={code} code={code} name={savedName} focusOnMount={joining} />
       )}
     </>
   );
@@ -67,21 +76,37 @@ function Placeholder({ text }: { text: string }) {
   );
 }
 
-/** Checks the lobby exists before opening a socket, so a dead link gets a friendly page. */
-function LobbyGate({ code, name }: { code: string; name: string }) {
+/**
+ * Checks the lobby exists before opening a socket, so a dead link gets a friendly page.
+ * `focusOnMount`: the player's own action put this in place of the focused button.
+ */
+function LobbyGate({
+  code,
+  name,
+  focusOnMount,
+}: {
+  code: string;
+  name: string;
+  focusOnMount: boolean;
+}) {
   const [lookup, setLookup] = useState<LobbyLookup | null>(null);
   const [tries, setTries] = useState(0);
+  const [checking, setChecking] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
     lookupLobby(code, fetch, controller.signal).then((result) => {
-      if (!controller.signal.aborted) setLookup(result);
+      if (controller.signal.aborted) return;
+      setLookup(result);
+      setChecking(false);
     });
     return () => controller.abort();
   }, [code, tries]);
 
+  // The panel (and its focused button) stays up while checking again.
   const retry = () => {
-    setLookup(null);
+    if (checking) return;
+    setChecking(true);
     setTries((n) => n + 1);
   };
 
@@ -91,7 +116,9 @@ function LobbyGate({ code, name }: { code: string; name: string }) {
     return (
       <RetryPanel
         text="Couldn't reach the game server. Check your connection and try again."
+        checking={checking}
         onRetry={retry}
+        focusOnMount={focusOnMount}
       />
     );
   }
@@ -100,21 +127,46 @@ function LobbyGate({ code, name }: { code: string; name: string }) {
     return (
       <RetryPanel
         text={`This game is full: both seats are taken and ${MAX_SPECTATORS_PER_LOBBY} people are watching. Try again in a little while.`}
+        checking={checking}
         onRetry={retry}
+        focusOnMount={focusOnMount}
       />
     );
   }
-  return <GameScreen key={name} code={code} name={name} />;
+  return <GameScreen key={name} code={code} name={name} focusOnMount={focusOnMount || tries > 0} />;
 }
 
-function RetryPanel({ text, onRetry }: { text: string; onRetry: () => void }) {
+function RetryPanel({
+  text,
+  checking,
+  onRetry,
+  focusOnMount,
+}: {
+  text: string;
+  checking: boolean;
+  onRetry: () => void;
+  focusOnMount: boolean;
+}) {
+  const button = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (focusOnMount && focusIsLost()) button.current?.focus();
+  }, [focusOnMount]);
+
   return (
     <div className={`${card} flex min-h-64 flex-col items-center justify-center gap-4 text-center`}>
       <p className="max-w-[44ch] text-muted" role="alert">
         {text}
       </p>
-      <button type="button" className={secondaryButton} onClick={onRetry}>
-        Try again
+      {/* aria-disabled rather than disabled, which would drop keyboard focus. */}
+      <button
+        ref={button}
+        type="button"
+        className={`${secondaryButton} aria-disabled:opacity-50`}
+        onClick={onRetry}
+        aria-disabled={checking}
+      >
+        {checking ? "Checking…" : "Try again"}
       </button>
     </div>
   );

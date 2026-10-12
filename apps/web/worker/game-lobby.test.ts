@@ -1,10 +1,10 @@
 import {
   CLOSE_CODES,
+  JOIN_TIMEOUT_MS,
   LOBBY_IDLE_TTL_MS,
-  MAX_SOCKETS_PER_LOBBY,
   MAX_SPECTATORS_PER_LOBBY,
+  MAX_UNJOINED_SOCKETS,
   RECONNECT_GRACE_MS,
-  SEATS,
   serverMsgSchema,
   type LobbyRecord,
   type ServerMsg,
@@ -221,8 +221,12 @@ describe("GameLobby /ws", () => {
     const socket = await connect(t);
     const [entry] = t.sockets;
     expect(entry?.tags).toHaveLength(1);
-    expect(socket.attachment).toEqual({ connId: entry?.tags[0], role: null });
+    expect(socket.attachment).toEqual({ connId: entry?.tags[0], role: null, openedAt: now });
     expect(stored(t)?.lastActivityAt).toBe(now);
+    // Until it joins, the alarm is due at its join timeout.
+    expect(t.storage.alarm).toBe(now + JOIN_TIMEOUT_MS);
+    await send(t, socket, { t: "join", name: "Xena" });
+    expect(socket.attachment).toMatchObject({ role: "X", openedAt: now });
     expect(t.storage.alarm).toBe(now + LOBBY_IDLE_TTL_MS);
   });
 
@@ -232,21 +236,66 @@ describe("GameLobby /ws", () => {
     expect((await t.lobby.fetch(new Request("https://lobby/ws"))).status).toBe(426);
   });
 
-  // One spare socket per seat on top of the cap, so a returning player always gets in.
-  const SOCKET_LIMIT = MAX_SOCKETS_PER_LOBBY + SEATS.length;
-
-  it(`refuses socket ${SOCKET_LIMIT + 1} with 409 LOBBY_FULL until one closes`, async () => {
+  it(`keeps at most ${MAX_UNJOINED_SOCKETS} unjoined sockets, closing the oldest with 4003`, async () => {
     const t = setup();
     await init(t.lobby);
     const sockets = [];
-    for (let i = 0; i < SOCKET_LIMIT; i++) sockets.push(await connect(t));
-    const full = await t.lobby.fetch(upgradeRequest());
-    expect(full.status).toBe(409);
-    expect(await full.json()).toMatchObject({ error: { code: "LOBBY_FULL" } });
+    for (let i = 0; i < MAX_UNJOINED_SOCKETS + 2; i++) {
+      sockets.push(await connect(t));
+      now += 1;
+    }
+    const timedOut = { code: CLOSE_CODES.joinTimeout, reason: "Join timed out" };
+    expect(sockets.map((s) => s.closed)).toEqual([
+      timedOut,
+      timedOut,
+      ...Array<null>(MAX_UNJOINED_SOCKETS).fill(null),
+    ]);
+    // A socket closed this way can't join afterwards.
+    await send(t, sockets[0]!, { t: "join", name: "Late" });
+    expect(sockets[0]!.take()).toEqual([]);
+    expect(stored(t)?.seats.X).toBeNull();
+  });
 
-    // A socket that is closing (still listed by the runtime) no longer counts.
-    await t.lobby.webSocketClose(ws(sockets[0]!));
-    await connect(t);
+  it("closes a socket that doesn't join in time, from the alarm or the next upgrade", async () => {
+    const t = setup();
+    await init(t.lobby);
+    const idle = await connect(t);
+    now += JOIN_TIMEOUT_MS - 1;
+    await t.lobby.alarm();
+    expect(idle.closed).toBeNull();
+    expect(t.storage.alarm).toBe(now + 1);
+    now += 1;
+    await t.lobby.alarm();
+    expect(idle.closed).toEqual({ code: CLOSE_CODES.joinTimeout, reason: "Join timed out" });
+    expect(t.storage.alarm).toBe(stored(t)!.lastActivityAt + LOBBY_IDLE_TTL_MS);
+
+    // Without an alarm in between (e.g. it was delayed), the next upgrade closes it.
+    const stale = await connect(t);
+    now += JOIN_TIMEOUT_MS;
+    const fresh = await connect(t);
+    expect(stale.closed?.code).toBe(CLOSE_CODES.joinTimeout);
+    expect(fresh.closed).toBeNull();
+  });
+
+  it("lets a dropped player back in however many sockets sit unjoined", async () => {
+    const t = setup();
+    await init(t.lobby);
+    const x = await join(t, "Xena");
+    const token = x.take().find((m) => m.t === "joined")?.token ?? undefined;
+    const o = await join(t, "Oscar");
+    for (let i = 0; i < MAX_SPECTATORS_PER_LOBBY; i++) await join(t, `Fan ${i}`);
+    await t.lobby.webSocketClose(ws(x));
+    t.forget(x);
+
+    // Squatters open sockets and never join...
+    const squatters = [];
+    for (let i = 0; i < 3; i++) squatters.push(await connect(t));
+    // ...but X still connects and reclaims the seat, and nothing is ever refused.
+    o.take();
+    const back = await join(t, "Xena", token);
+    expect(back.take()[0]).toMatchObject({ t: "joined", role: "X" });
+    expect(states(o.take())[0]?.state).toMatchObject({ players: { X: { connected: true } } });
+    expect(squatters.filter((s) => s.closed === null)).toHaveLength(MAX_UNJOINED_SOCKETS - 1);
   });
 
   it("refuses an extra spectator but lets a dropped player reclaim the seat", async () => {
@@ -464,12 +513,12 @@ describe("GameLobby alarm", () => {
     const t = setup();
     await init(t.lobby);
     const x = await join(t, "Xena");
-    const spare = await connect(t);
+    const o = await join(t, "Oscar");
 
     now += LOBBY_IDLE_TTL_MS;
     await t.lobby.alarm();
     expect(x.closed).toEqual({ code: 4001, reason: "Lobby expired" });
-    expect(spare.closed).toEqual({ code: 4001, reason: "Lobby expired" });
+    expect(o.closed).toEqual({ code: 4001, reason: "Lobby expired" });
     expect(t.storage.deleteAll).toHaveBeenCalledOnce();
     expect(t.kv.size).toBe(0);
     expect(t.storage.alarm).toBeNull();

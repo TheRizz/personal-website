@@ -71,9 +71,19 @@ describe("announcement", () => {
     turn,
   });
 
-  it("says nothing for the first snapshot or an unchanged one", () => {
-    expect(announcement(null, state({}), "X")).toBeNull();
+  it("says nothing for an unchanged snapshot, or a first one that isn't a game in progress", () => {
     expect(announcement(state({}), state({}), "X")).toBeNull();
+    expect(announcement(null, waiting, "X")).toBeNull();
+    const over = state({ phase: "finished", result: { kind: "draw" } });
+    expect(announcement(null, over, "X")).toBeNull();
+    expect(announcement(null, state({}), null)).toBeNull();
+  });
+
+  it("says who you are when you arrive in a game in progress", () => {
+    // E.g. joining through an invite: the join itself starts the game.
+    expect(announcement(null, state({}), "O")).toBe("You are O. Waiting for Ada.");
+    expect(announcement(null, state({}), "X")).toBe("You are X. Your move.");
+    expect(announcement(null, state({}), "spectator")).toBe("Ada and Bo are playing. Ada's move.");
   });
 
   it("announces the game starting", () => {

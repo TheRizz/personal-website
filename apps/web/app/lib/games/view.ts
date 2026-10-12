@@ -66,19 +66,25 @@ function lineName(line: number[]): string {
 const sentence = (text: string) => (/[.…!?]$/.test(text) ? text : `${text}.`);
 
 /**
- * What a screen reader should hear when the lobby changes from `prev` to `next`, or null for
- * nothing. Covers what the screen only shows visually: the game starting, where the other player
- * moved, how a round ended, rematch requests and players dropping out or coming back.
+ * What a screen reader should hear when the lobby changes from `prev` to `next` (null: the first
+ * snapshot), or null for nothing. Covers what the screen only shows visually: the game starting
+ * (including joining one that already has two players), where the other player moved, how a round
+ * ended, rematch requests and players dropping out or coming back.
  */
 export function announcement(
   prev: PublicState | null,
   next: PublicState,
   role: Role | null,
 ): string | null {
-  if (!prev) return null;
-  const parts: string[] = [];
   const opponent = opponentOf(role);
   const headline = sentence(statusHeadline(next, role).text);
+  if (!prev) {
+    if (next.phase !== "playing" || role === null) return null;
+    return opponent
+      ? `You are ${role}. ${headline}`
+      : `${playerName(next, "X")} and ${playerName(next, "O")} are playing. ${headline}`;
+  }
+  const parts: string[] = [];
 
   for (const seat of opponent ? [opponent] : SEATS) {
     const before = prev.players[seat];

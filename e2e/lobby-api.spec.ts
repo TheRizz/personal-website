@@ -3,10 +3,9 @@ import {
   CLOSE_CODES,
   LOBBY_CREATE_LIMIT_PER_MINUTE,
   MAX_MESSAGE_BYTES,
-  MAX_SOCKETS_PER_LOBBY,
   MAX_SPECTATORS_PER_LOBBY,
+  MAX_UNJOINED_SOCKETS,
   RECONNECT_GRACE_MS,
-  SEATS,
   generateLobbyCode,
   isLobbyCode,
   type ServerMsg,
@@ -223,27 +222,31 @@ test.describe("WebSocket handshake", () => {
     await expectApiError(await request.get(`/api/lobbies/${code}`), 404, "not_found");
   });
 
-  // One spare socket per seat on top of the cap, so a returning player always gets in.
-  const SOCKET_LIMIT = MAX_SOCKETS_PER_LOBBY + SEATS.length;
+  test("sockets that never join can't keep a dropped player out", async ({ lobby }) => {
+    const { x, o } = await startGame(lobby);
+    for (let i = 0; i < MAX_SPECTATORS_PER_LOBBY; i++) await lobby.join(`Fan ${i}`);
+    await o.client.next("state", (m) => m.state.spectators === MAX_SPECTATORS_PER_LOBBY);
+    x.client.close();
+    await o.client.next("state", (m) => m.state.players.X?.connected === false);
 
-  test(`the ${SOCKET_LIMIT + 1}th socket is rejected with 409`, async ({ request, lobby }) => {
-    const sockets = [];
-    for (let i = 0; i < SOCKET_LIMIT; i++) sockets.push(await lobby.connect());
+    // More idle sockets than MAX_UNJOINED_SOCKETS: the oldest is closed to make room. (Each
+    // pings first: locally, a close for a socket that never sent a frame doesn't reach it.)
+    const squatters = [];
+    for (let i = 0; i <= MAX_UNJOINED_SOCKETS; i++) {
+      const squatter = await lobby.connect();
+      squatter.send("ping");
+      expect(await squatter.nextText()).toBe("pong");
+      squatters.push(squatter);
+    }
+    expect(await squatters[0]!.waitForClose()).toEqual({
+      code: CLOSE_CODES.joinTimeout,
+      reason: "Join timed out",
+    });
 
-    await expect(LobbyClient.connect(lobby.code)).rejects.toThrow();
-    await expectApiError(
-      await request.get(`/api/lobbies/${lobby.code}/ws`, { headers: { Upgrade: "websocket" } }),
-      409,
-      "LOBBY_FULL",
-    );
-
-    // Closing one socket frees a slot.
-    sockets[0]!.close();
-    await sockets[0]!.waitForClose();
-    await expect(async () => {
-      const client = await LobbyClient.connect(lobby.code);
-      client.close();
-    }).toPass({ timeout: 5_000 });
+    // X is never refused at the handshake, and reclaims the seat.
+    const back = await lobby.join("Xena", x.joined.token!);
+    expect(back.joined).toMatchObject({ t: "joined", role: "X" });
+    expect(back.state.state.players.X).toMatchObject({ connected: true, releaseAt: null });
   });
 
   test("a full lobby refuses another spectator but lets a dropped player back in", async ({

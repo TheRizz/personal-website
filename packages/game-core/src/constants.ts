@@ -5,11 +5,18 @@ export const MAX_NAME_LENGTH = 20;
 /** Max size of one client WebSocket frame, in UTF-8 bytes. */
 export const MAX_MESSAGE_BYTES = 4096;
 /**
- * 2 players + up to 8 spectators. Spectators are capped when they join (MAX_SPECTATORS_PER_LOBBY);
- * the Durable Object refuses upgrades only past this plus one spare socket per seat, so a player
- * reclaiming a held seat can always connect, however many people are watching.
+ * Joined sockets: 2 players + up to 8 spectators. Spectators are capped when they join
+ * (MAX_SPECTATORS_PER_LOBBY), so only sockets that haven't joined yet are limited at upgrade.
  */
 export const MAX_SOCKETS_PER_LOBBY = 10;
+/**
+ * Sockets that are open but haven't sent `join`. The Durable Object never refuses an upgrade for
+ * these: past the limit it closes the oldest one (CLOSE_CODES.joinTimeout), so sockets that never
+ * join can't keep a player reclaiming a held seat out.
+ */
+export const MAX_UNJOINED_SOCKETS = 2;
+/** A socket that hasn't sent `join` this long after connecting is closed (CLOSE_CODES.joinTimeout). */
+export const JOIN_TIMEOUT_MS = 10_000;
 /** A join that would add a spectator past this is refused with LOBBY_FULL (close 4002). */
 export const MAX_SPECTATORS_PER_LOBBY = MAX_SOCKETS_PER_LOBBY - 2;
 /** Per socket; going over closes the socket with 1008. */
@@ -33,4 +40,6 @@ export const CLOSE_CODES = {
   lobbyExpired: 4001,
   /** Both seats are taken and the spectator cap is reached. Clients may retry later. */
   lobbyFull: 4002,
+  /** The socket didn't join within JOIN_TIMEOUT_MS, or a newer one needed its slot. May retry. */
+  joinTimeout: 4003,
 } as const;

@@ -438,13 +438,24 @@ test.describe("tic-tac-toe in the browser", () => {
       await acceptInvite(page, code, "Late");
       await expect(page.getByText(/^This game is full: both seats are taken/)).toBeVisible();
       await expect(page.getByText("You're watching.")).toHaveCount(0);
+      // Focus moved from "Join game" to "Try again", and stays there while checking again.
+      const tryAgain = page.getByRole("button", { name: "Try again" });
+      await expect(tryAgain).toBeFocused();
+      await Promise.all([
+        page.waitForResponse(new RegExp(`/api/lobbies/${code}$`)),
+        page.keyboard.press("Enter"),
+      ]);
+      await expect(page.getByText(/^This game is full/)).toBeVisible();
+      await expect(tryAgain).toBeFocused();
 
       // A spectator leaves.
       sockets.pop()!.close();
       await expect(async () => {
-        await page.getByRole("button", { name: "Try again" }).click();
+        await tryAgain.press("Enter");
         await expect(page.getByText("You're watching.")).toBeVisible({ timeout: 1_000 });
       }).toPass({ timeout: 10_000 });
+      // The panel went away; focus didn't fall back to the page.
+      await expect(page.getByRole("status").getByText("Connected")).toBeFocused();
     } finally {
       for (const socket of sockets) socket.close();
     }
@@ -581,8 +592,39 @@ test.describe("tic-tac-toe in the browser", () => {
     await expect(headline(alice, "Waiting for Christopher Long")).toBeVisible();
     expect(await boardTop()).toBe(top);
 
+    // The countdown is above the board, so it is on screen and the board doesn't move.
     await bob.close();
-    await expect(alice.getByText(/^Christopher Long disconnected — seat held/)).toBeVisible();
+    await expect(alice.getByText(/^Christopher Long disconnected — seat held/)).toBeInViewport();
     expect(await boardTop()).toBe(top);
+  });
+
+  test("on a phone, Play again comes into view when the round ends", async ({ open }) => {
+    const alice = (await open({ viewport: { width: 360, height: 640 } })).page;
+    const bob = (await open()).page;
+    const code = await createGame(alice, "Alice");
+    await acceptInvite(bob, code, "Bob");
+    await playMoves(alice, bob, [4, 0, 1, 2, 7], ["X", "O"]);
+    await expect(headline(alice, "You win")).toBeVisible();
+    await expect(alice.getByRole("button", { name: "Play again" })).toBeInViewport();
+
+    // Bob asking for a rematch adds a line above it; it stays in view.
+    await bob.getByRole("button", { name: "Play again" }).click();
+    await expect(alice.getByText("Bob wants a rematch", { exact: true })).toBeInViewport();
+    await expect(alice.getByRole("button", { name: "Play again" })).toBeInViewport();
+
+    await bob.close();
+    await expect(alice.getByText(/^Bob disconnected — seat held/)).toBeInViewport();
+  });
+
+  test("joining from an invite moves focus to the game and says who you are", async ({ open }) => {
+    const alice = (await open()).page;
+    const bob = (await open()).page;
+    const code = await createGame(alice, "Alice");
+    await bob.goto(`/games/tictactoe/${code}`);
+    await fillName(bob, "Bob");
+    await bob.getByLabel("Your name").press("Enter");
+    await expect(headline(bob, "Waiting for Alice")).toBeVisible();
+    await expect(bob.getByRole("status").getByText("Connected")).toBeFocused();
+    await expect(bob.getByText("You are O. Waiting for Alice.")).toBeAttached();
   });
 });

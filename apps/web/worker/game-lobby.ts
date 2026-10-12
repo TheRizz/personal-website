@@ -1,8 +1,8 @@
 import {
   CLOSE_CODES,
+  JOIN_TIMEOUT_MS,
   MAX_MESSAGES_PER_SECOND,
-  MAX_SOCKETS_PER_LOBBY,
-  SEATS,
+  MAX_UNJOINED_SOCKETS,
   closeConnection,
   createLobby,
   handleAlarm,
@@ -30,6 +30,14 @@ const noStore = { "Cache-Control": "no-store" };
 function jsonError(status: number, code: string, message: string): Response {
   return Response.json({ error: { code, message } }, { status, headers: noStore });
 }
+
+/** A socket's serialized attachment: game-core's Connection plus when it was accepted. */
+interface Attachment extends Connection {
+  /** Epoch ms of the upgrade; a socket still unjoined after JOIN_TIMEOUT_MS is closed. */
+  openedAt: number;
+}
+
+type LiveSocket = { ws: WebSocket; conn: Attachment };
 
 /**
  * One instance per game lobby: a thin transport around game-core's pure lobby state machine.
@@ -93,7 +101,9 @@ export class GameLobby implements DurableObject {
 
   async alarm(): Promise<void> {
     if (!this.lobby) return;
-    await this.apply(handleAlarm(this.lobby, { now: Date.now() }));
+    const now = Date.now();
+    this.closeUnjoined(now);
+    await this.apply(handleAlarm(this.lobby, { now }));
   }
 
   private async init(request: Request): Promise<Response> {
@@ -105,7 +115,7 @@ export class GameLobby implements DurableObject {
     if (this.lobby) return jsonError(409, "conflict", "Lobby already exists.");
     this.lobby = createLobby({ code, game, now: Date.now() });
     this.ctx.storage.kv.put(LOBBY_KEY, this.lobby);
-    await this.ctx.storage.setAlarm(nextAlarmAt(this.lobby));
+    await this.armAlarm(this.lobby);
     const created = { code, game, expiresAt: lobbyExpiresAt(this.lobby) };
     return Response.json(created, { status: 201, headers: noStore });
   }
@@ -116,18 +126,18 @@ export class GameLobby implements DurableObject {
     }
     if (!this.lobby) return jsonError(404, "not_found", "Lobby not found.");
     this.pruneGone();
-    // Spectators are capped on join (game-core), so a full lobby still has a spare socket per seat:
-    // a player reclaiming a held seat must never be refused here.
-    if (this.liveSockets().length >= MAX_SOCKETS_PER_LOBBY + SEATS.length) {
-      return jsonError(409, "LOBBY_FULL", "This lobby is full.");
-    }
+    const now = Date.now();
+    // Joined sockets are capped by game-core (2 seats + MAX_SPECTATORS_PER_LOBBY), so an upgrade is
+    // never refused: a player reclaiming a held seat must always get in. Sockets that don't join
+    // are closed after JOIN_TIMEOUT_MS, and the oldest makes room for this one past the limit.
+    this.closeUnjoined(now, MAX_UNJOINED_SOCKETS - 1);
     const { 0: client, 1: server } = new WebSocketPair();
     const connId = crypto.randomUUID();
     this.ctx.acceptWebSocket(server, [connId]);
-    server.serializeAttachment({ connId, role: null } satisfies Connection);
-    this.lobby = touch(this.lobby, Date.now());
+    server.serializeAttachment({ connId, role: null, openedAt: now } satisfies Attachment);
+    this.lobby = touch(this.lobby, now);
     this.ctx.storage.kv.put(LOBBY_KEY, this.lobby);
-    await this.ctx.storage.setAlarm(nextAlarmAt(this.lobby));
+    await this.armAlarm(this.lobby);
     return new Response(null, { status: 101, webSocket: client });
   }
 
@@ -173,12 +183,36 @@ export class GameLobby implements DurableObject {
           return;
       }
     }
-    await this.ctx.storage.setAlarm(nextAlarmAt(lobby));
+    await this.armAlarm(lobby);
   }
 
-  private connection(ws: WebSocket): Connection | null {
+  /** The lobby's next alarm, or sooner if an unjoined socket's join timeout comes first. */
+  private async armAlarm(lobby: LobbyRecord): Promise<void> {
+    const joinDeadlines = this.unjoinedSockets().map(({ conn }) => conn.openedAt + JOIN_TIMEOUT_MS);
+    await this.ctx.storage.setAlarm(Math.min(nextAlarmAt(lobby), ...joinDeadlines));
+  }
+
+  /** Closes unjoined sockets past JOIN_TIMEOUT_MS, then the oldest ones until `keep` are left. */
+  private closeUnjoined(now: number, keep = Number.POSITIVE_INFINITY): void {
+    const unjoined = this.unjoinedSockets();
+    const reason = "Join timed out";
+    unjoined.forEach(({ conn }, i) => {
+      if (now - conn.openedAt >= JOIN_TIMEOUT_MS || unjoined.length - i > keep) {
+        this.close(conn.connId, CLOSE_CODES.joinTimeout, reason);
+      }
+    });
+  }
+
+  /** Live sockets that haven't joined, oldest first. */
+  private unjoinedSockets(): LiveSocket[] {
+    return this.liveSockets()
+      .filter(({ conn }) => conn.role === null)
+      .sort((a, b) => a.conn.openedAt - b.conn.openedAt);
+  }
+
+  private connection(ws: WebSocket): Attachment | null {
     try {
-      return (ws.deserializeAttachment() as Connection | null) ?? null;
+      return (ws.deserializeAttachment() as Attachment | null) ?? null;
     } catch {
       return null;
     }
@@ -189,8 +223,8 @@ export class GameLobby implements DurableObject {
   }
 
   /** Accepted sockets that are open and not closed by us, with their attachments. */
-  private liveSockets(): { ws: WebSocket; conn: Connection }[] {
-    const live: { ws: WebSocket; conn: Connection }[] = [];
+  private liveSockets(): LiveSocket[] {
+    const live: LiveSocket[] = [];
     for (const ws of this.ctx.getWebSockets()) {
       if (ws.readyState !== WebSocket.OPEN) continue;
       const conn = this.connection(ws);
@@ -211,8 +245,10 @@ export class GameLobby implements DurableObject {
 
   private setRole(connId: string, role: Role | null): void {
     const ws = this.ctx.getWebSockets(connId)[0];
+    if (!ws) return;
     try {
-      ws?.serializeAttachment({ connId, role } satisfies Connection);
+      const openedAt = this.connection(ws)?.openedAt ?? 0;
+      ws.serializeAttachment({ connId, role, openedAt } satisfies Attachment);
     } catch {
       // The socket is already closing; it is excluded via `gone` instead.
       this.gone.add(connId);

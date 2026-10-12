@@ -96,8 +96,8 @@ describe("close codes", () => {
     expect(classifyClose(4000)).toBe("replaced");
     expect(classifyClose(4001)).toBe("expired");
     expect(classifyClose(1008)).toBe("policy");
-    // 4002 (lobby full) is retried: spectators come and go.
-    for (const code of [1000, 1001, 1006, 1011, 1012, 4002]) {
+    // 4002 (lobby full) is retried: spectators come and go. So is 4003 (join timed out).
+    for (const code of [1000, 1001, 1006, 1011, 1012, 4002, 4003]) {
       expect(classifyClose(code)).toBe("retry");
     }
   });
