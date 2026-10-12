@@ -12,6 +12,8 @@ export default tseslint.config(
       "**/.wrangler/",
       "**/worker-configuration.d.ts",
       "apps/web/app/generated/",
+      "playwright-report/",
+      "test-results/",
     ],
   },
   js.configs.recommended,
@@ -30,5 +32,11 @@ export default tseslint.config(
   {
     files: ["scripts/**", "**/*.config.{js,ts}"],
     languageOptions: { globals: globals.node },
+  },
+  {
+    files: ["e2e/**/*.ts", "playwright.config.ts"],
+    languageOptions: { globals: globals.node },
+    // Playwright fixtures call `use()`, which the hooks rule mistakes for React's use().
+    rules: { "react-hooks/rules-of-hooks": "off" },
   },
 );

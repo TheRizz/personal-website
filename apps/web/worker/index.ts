@@ -1,4 +1,7 @@
 import { createRequestHandler } from "react-router";
+import { handleApi } from "./api";
+
+export { GameLobby } from "./game-lobby";
 
 declare module "react-router" {
   export interface AppLoadContext {
@@ -15,22 +18,6 @@ const requestHandler = createRequestHandler(
 
 const noStore = { "Cache-Control": "no-store" };
 
-/**
- * One instance per game lobby. Implemented in Phase 7 (design doc §4.5).
- * Written as a plain class rather than extending DurableObject from "cloudflare:workers",
- * because React Router prerenders pages by loading this module in Node.
- */
-export class GameLobby implements DurableObject {
-  constructor(
-    readonly ctx: DurableObjectState,
-    readonly env: Env,
-  ) {}
-
-  fetch(): Response {
-    return new Response("Not implemented", { status: 501 });
-  }
-}
-
 export default {
   async fetch(request, env, ctx) {
     const { pathname } = new URL(request.url);
@@ -38,12 +25,7 @@ export default {
     if (pathname === "/api/health") {
       return Response.json({ ok: true, version: __APP_VERSION__ }, { headers: noStore });
     }
-    if (pathname.startsWith("/api/")) {
-      return Response.json(
-        { error: { code: "not_found", message: "No such API route." } },
-        { status: 404, headers: noStore },
-      );
-    }
+    if (pathname.startsWith("/api/")) return handleApi(request, env);
 
     return requestHandler(request, { cloudflare: { env, ctx } });
   },

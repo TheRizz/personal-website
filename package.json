@@ -11,8 +11,9 @@
     "dev": "pnpm content --drafts && pnpm --filter web dev",
     "build": "pnpm content && pnpm --filter web build",
     "lint": "eslint .",
-    "typecheck": "pnpm content && pnpm -r typecheck && tsc -p tsconfig.scripts.json",
+    "typecheck": "pnpm content && pnpm -r typecheck && tsc -p tsconfig.scripts.json && tsc -p e2e/tsconfig.json",
     "test": "vitest run",
+    "e2e": "playwright test",
     "format": "prettier --write .",
     "format:check": "prettier --check ."
   },

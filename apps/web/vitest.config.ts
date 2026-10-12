@@ -3,5 +3,5 @@ import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineProject({
   plugins: [tsconfigPaths()],
-  test: { name: "web", include: ["app/**/*.test.{ts,tsx}"] },
+  test: { name: "web", include: ["app/**/*.test.{ts,tsx}", "worker/**/*.test.ts"] },
 });
