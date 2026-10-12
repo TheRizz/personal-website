@@ -345,7 +345,7 @@ one-click publishing.
 
 **Done when:** every existing post renders byte-identical HTML to before. Golden tests pass: round trip is idempotent, rendered HTML is the same after a round trip, typed syntax stays escaped, `16:9` and `10:30am` are untouched, a bad `src`, missing `alt`, missing `w`/`h` or unknown `size` fails the build with file and line. A test post with a wide figure renders `figure`, `img[srcset]` and `figcaption`.
 
-### Step 10.3: Admin shell and the Edit link
+### Step 10.3: Admin shell
 - [ ] `/admin` layout route: client data only, CSP with a per-request nonce, `frame-ancestors 'none'`, a "Sign out" link that also clears `owner_hint`, and an empty draft list. Never in the prerender list.
 - [ ] The `fetch` wrapper for `/api/admin/*`: adds `X-Requested-With: XMLHttpRequest` (Access answers 401, not a redirect) and `X-Admin: 1` (the gate needs it on writes), and shows "Session expired" on 401.
 

@@ -28,3 +28,8 @@ export function pageMeta({
     { name: "twitter:card", content: "summary" },
   ];
 }
+
+/** Title and noindex for an admin page: no canonical URL or Open Graph tags, nothing to share. */
+export function adminMeta(title: string) {
+  return [{ title: `${title} · Admin · ${site.name}` }, { name: "robots", content: "noindex" }];
+}

@@ -44,6 +44,28 @@ export function contentSecurityPolicy({
   ].join("; ");
 }
 
+/**
+ * The admin area's stricter CSP (design doc §4.9.8). Admin pages talk only to /api/admin, so no
+ * WebSocket and no analytics; `blob:` images are previews of uploads before they are sent.
+ */
+export function adminContentSecurityPolicy({
+  inlineScripts = [],
+}: Pick<PolicyOptions, "inlineScripts"> = {}): string {
+  return [
+    "default-src 'self'",
+    // 'wasm-unsafe-eval' lets the in-browser WebP encoder (Step 10.6) compile. It allows no eval().
+    ["script-src 'self'", ...inlineScripts, "'wasm-unsafe-eval'"].join(" "),
+    "style-src 'self' 'unsafe-inline'",
+    `img-src 'self' ${PHOTOS_ORIGIN} blob: data:`,
+    "font-src 'self' data:",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+  ].join("; ");
+}
+
 /** A fresh CSP nonce (128 random bits, base64). */
 export function createNonce(): string {
   return toBase64(crypto.getRandomValues(new Uint8Array(16)));
