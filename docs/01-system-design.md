@@ -1,8 +1,9 @@
 # Personal Website — System Design
 
-Status: **Proposed** · Owner: Ryan Martinez · Last updated: 2026-10-11
+Status: **Proposed** · Owner: Ryan Martinez · Last updated: 2026-10-12
 
-This document is the planning baseline. Nothing here is built yet. The phased
+This document started as the planning baseline. The skeleton, site shell, blog
+and game are built now, and §4.5 describes the game as built. The phased
 build steps are in [`03-execution-plan.md`](./03-execution-plan.md), and the
 purchase, setup and operations guide is in
 [`02-hosting-and-costs.md`](./02-hosting-and-costs.md).
@@ -123,12 +124,12 @@ apps/web/app/generated/*.json  ──▶ React Router loaders ──▶ prerende
 Player A                       Worker                 GameLobby DO (code=K7QX3P)        Player B
    │ POST /api/lobbies          │                              │                           │
    │───────────────────────────▶│ gen code, rate-limit         │                           │
-   │                            │──── init(game="tictactoe") ─▶│                           │
+   │                            │──── POST /init (stub.fetch) ▶│                           │
    │◀──── 201 {code:"K7QX3P"} ──│                              │                           │
    │ WS /api/lobbies/K7QX3P/ws  │──── forward upgrade ────────▶│ seat X, token tA          │
-   │◀═════════ {joined, seat:X, token} ═══════════════════════│                           │
+   │◀═════════ {joined, role:X, token} ═══════════════════════│                           │
    │                            │                              │◀══ WS join (code) ════════│
-   │◀═════════ {state: playing, turn: X} ═════════════════════│══ {joined, seat:O} ══════▶│
+   │◀═════════ {state: playing, turn: X} ═════════════════════│══ {joined, role:O} ══════▶│
    │ {move, cell:4} ═══════════════════════════════════════▶ │ validate via game-core    │
    │◀═════════ {state ...}      ══════════════════════════════│══ {state ...} ═══════════▶│
 ```
@@ -144,11 +145,11 @@ personal-website/
 ├─ apps/
 │  └─ web/                    # React Router v7 app + Worker entry (one deployable)
 │     ├─ app/                 # routes, components, styles
-│     ├─ worker/              # Worker fetch handler + GameLobby Durable Object
+│     ├─ worker/              # Worker entry, /api/lobbies (api.ts), GameLobby DO
 │     ├─ public/              # favicon, robots.txt, resume.pdf (generated)
 │     └─ wrangler.jsonc
 ├─ packages/
-│  ├─ game-core/              # pure TS game rules + protocol types (no I/O)
+│  ├─ game-core/              # pure TS: game rules, protocol schemas, lobby state machine
 │  └─ content-schema/         # zod schemas shared by build script and app
 ├─ content/
 │  ├─ resume.yaml             # JSON Resume schema, YAML-encoded
@@ -160,7 +161,8 @@ personal-website/
 │  ├─ build-content.ts
 │  ├─ photos-upload.ts        # resize → upload to R2 → append manifest
 │  └─ resume-pdf.ts           # Playwright print-to-PDF of /resume
-├─ e2e/                       # Playwright tests (incl. 2-player game)
+├─ e2e/                       # Playwright: lobby API, protocol, 2-player browser game
+├─ playwright.config.ts       # e2e runs against `vite preview` (workerd) on port 4173
 ├─ docs/                      # this design + ADRs + runbooks
 └─ .github/workflows/         # ci.yml, deploy.yml, uptime.yml
 ```
@@ -241,8 +243,8 @@ otherwise free-form, lowercase and kebab-case.
 | `/tags`, `/tags/:tag` | prerender | Mixed list grouped by content type |
 | `/search?q=&type=&tag=` | client | Also a global `Ctrl+K` command palette |
 | `/games` | prerender shell | List of available games |
-| `/games/tictactoe` | client | Create or join lobby |
-| `/games/tictactoe/:code` | client | Live game (shareable link) |
+| `/games/tictactoe` | prerender | Create or join lobby |
+| `/games/tictactoe/:code` | server, on demand | Live game (shareable link). A malformed code is a 404, a lowercase code redirects. |
 | `/rss.xml`, `/sitemap.xml`, `/robots.txt` | static | |
 
 ### 4.4 Search design
@@ -256,75 +258,150 @@ otherwise free-form, lowercase and kebab-case.
 
 ### 4.5 Game service design
 
+This section describes the game as built (Phases 7 and 8). The constants are in
+`packages/game-core/src/constants.ts`.
+
 **Lobby codes:** 6 characters from a 31-character alphabet with no ambiguous
 characters (`ABCDEFGHJKMNPQRSTUVWXYZ23456789`). That gives 887M combinations.
-The code maps to an object with `env.GAME_LOBBY.idFromName(code)`. On create,
-the Worker calls the object's `init()`, which fails if the lobby already exists.
-In that case the Worker generates a new code (at most 3 attempts).
+Codes use rejection sampling, so every character is equally likely. The code
+maps to an object with `env.GAME_LOBBY.getByName(code)`. On create, the Worker
+sends the object `POST /init`, which returns 409 if the lobby already exists.
+In that case the Worker generates a new code (at most 3 attempts, then 503).
+
+**Worker and Durable Object:** `GameLobby` is a plain class that implements
+`DurableObject`. It doesn't extend the base class or import `cloudflare:workers`,
+because React Router prerenders by importing the Worker module in Node, where
+those don't exist. Workerd-only globals such as `WebSocketPair` are only used
+inside methods for the same reason. Without the base class there is no RPC, so
+the Worker calls the object with `stub.fetch()` on internal routes: `POST /init`,
+`GET /info` and `GET /ws`.
+
+The lobby rules live in `game-core` (`src/lobby.ts`) as a pure state machine. It
+takes the lobby record and a message and returns the new record plus a list of
+effects (send, set a socket's role, close, broadcast, expire). The Durable Object
+is a thin transport: it stores the record, runs the effects and sets the alarm.
+The rules are unit-tested in Node and don't depend on Cloudflare.
 
 **HTTP API (Worker):**
 
 | Method | Path | Request | Response |
 |--------|------|---------|----------|
-| `POST` | `/api/lobbies` | `{game: "tictactoe"}` | `201 {code, game, expiresAt}` · `429` when rate limited |
-| `GET` | `/api/lobbies/:code` | – | `200 {code, game, status: waiting\|playing\|finished, seatsTaken}` · `404` |
-| `GET` | `/api/lobbies/:code/ws` | `Upgrade: websocket` | `101` · `404` unknown lobby (a full lobby refuses the `join` message, not the upgrade) |
+| `POST` | `/api/lobbies` | `Content-Type: application/json`, `{game: "tictactoe"}` | `201 {code, game, expiresAt}` · `400` bad body · `415` wrong content type · `429` rate limited (`Retry-After: 60`) · `503` no free code after 3 tries |
+| `GET` | `/api/lobbies/:code` | – | `200 {code, game, phase: waiting\|playing\|finished, seatsTaken, connectedSeats, spectators}` · `404` |
+| `GET` | `/api/lobbies/:code/ws` | `Upgrade: websocket` | `101` · `404` unknown lobby · `403` `Origin` from another site · `426` not an upgrade |
 | `GET` | `/api/health` | – | `200 {ok: true, version}` |
 
-**WebSocket protocol** (JSON messages, validated with zod on both ends, 4 KB max per message):
+Errors are JSON (`{error: {code, message}}`) and every `/api/*` response is
+`no-store`. A wrong method on a known path gets `405` with `Allow`. A malformed
+code gets `404` before any Durable Object is touched, and only `/init` writes
+storage, so lookups never create a lobby. `seatsTaken` includes a seat held for
+a disconnected player and `connectedSeats` doesn't, so a player coming back
+isn't told the game is full. The upgrade is never refused for a full lobby; the
+`join` is (see below).
+
+**WebSocket protocol** (JSON text frames, validated with zod on both ends, 4 KB max per message):
 
 ```ts
 // client → server
 type ClientMsg =
-  | { t: "join";    name: string; token?: string }   // token = reconnect
-  | { t: "move";    move: unknown; seq: number }     // move shape per game
+  | { t: "join";    name: string; token?: string }   // token = reconnect to a seat
+  | { t: "move";    move: unknown; seq: number }     // seq of the latest state seen
   | { t: "rematch" }
   | { t: "leave" };
 
 // server → client
 type ServerMsg =
-  | { t: "joined";  seat: "X" | "O" | "spectator"; token: string }
+  | { t: "joined";  role: "X" | "O" | "spectator"; token: string | null } // null for spectators
   | { t: "state";   state: PublicState; seq: number } // full snapshot every time
-  | { t: "error";   code: "NOT_YOUR_TURN" | "INVALID_MOVE" | "LOBBY_FULL"
-                       | "BAD_MESSAGE" | "GAME_OVER"; message: string };
+  | { t: "error";   code: ErrorCode; message: string };
+
+type ErrorCode =
+  | "NOT_YOUR_TURN" | "INVALID_MOVE" | "GAME_OVER"   // from validateMove
+  | "LOBBY_FULL"                                     // spectator cap reached, then close 4002
+  | "BAD_MESSAGE"                                    // second join, rematch before the game ends
+  | "NOT_JOINED"                                     // anything before join
+  | "NOT_A_PLAYER"                                   // a spectator tried to move
+  | "STALE_STATE";                                   // move.seq isn't the current seq
 ```
+
+`PublicState` holds the code, game, `phase`, both players (name, `connected`, and
+`releaseAt` while disconnected), the spectator count, board, result, round, who
+started the round, score and rematch flags. It never contains tokens. Errors go
+only to the socket that caused them and leave it open, except `LOBBY_FULL`.
 
 The server always sends a **full state snapshot** rather than a diff. Tic-tac-toe
 state is under 200 bytes, so this costs nothing and makes reconnecting trivial.
-Ping/pong uses `setWebSocketAutoResponse`, so keepalives do not wake the object
-and are not billed.
+For keepalive, clients send the bare text frame `"ping"` every 30 s and get
+`"pong"` back. `setWebSocketAutoResponse` answers it, so keepalives do not wake
+the object and are not billed.
+
+**Close codes:**
+
+| Code | Meaning | Client reconnects? |
+|------|---------|--------------------|
+| `1000` | The player sent `leave`, and the seat was released | No |
+| `1008` | A binary, oversized, non-JSON or schema-invalid frame, an unknown message type, or more than 10 messages a second | No |
+| `4000` | Another socket joined with this seat's token, for example a duplicated tab. The seat moves to the new socket. | No. The old tab offers "Watch here". |
+| `4001` | The lobby was idle for 30 minutes and has been deleted | No |
+| `4002` | Lobby full: both seats are taken and 8 spectators are watching | Yes, with backoff |
+| `4003` | The socket didn't send `join` within 10 s, or a newer socket needed its slot | Yes, with backoff |
 
 **`game-core` abstraction** (pure functions, unit-tested, shared by browser and DO):
 
 ```ts
 interface GameDefinition<S, M> {
   id: string;                         // "tictactoe"
+  name: string;                       // "Tic-tac-toe"
   players: 2;
-  init(): S;
-  validateMove(s: S, seat: Seat, m: unknown): M | GameError; // parse + legality
+  init(firstSeat: Seat): S;           // rematches alternate who starts
+  validateMove(s: S, seat: Seat, m: unknown): MoveResult<M>; // parse + legality
   applyMove(s: S, seat: Seat, m: M): S;
   status(s: S): { kind: "playing"; turn: Seat }
               | { kind: "won"; winner: Seat; line?: number[] }
               | { kind: "draw" };
 }
+
+type MoveResult<M> =
+  | { ok: true; move: M }
+  | { ok: false; code: "NOT_YOUR_TURN" | "INVALID_MOVE" | "GAME_OVER"; message: string };
 ```
-To add Connect Four, you write a new `GameDefinition` and a board component.
-The Durable Object, protocol and lobby UI stay as they are.
+To add Connect Four, you write a new `GameDefinition`, add it to `GAMES` in
+`game-core`, and write a board component. The Durable Object and the lobby rules
+stay as they are. The protocol's `board` schema is tic-tac-toe only for now and
+would become a union of the games' states.
 
-**GameLobby Durable Object lifecycle:**
-1. `init(game)`: store `{game, createdAt, status: "waiting"}` and set an alarm for `now + 30 min`.
-2. WebSocket connect: `ctx.acceptWebSocket(ws)` (hibernation). Attach `{seat, token}` with `ws.serializeAttachment`.
-3. `join`: if a valid `token` is sent, give back the same seat (reconnect). Otherwise take the first free seat. A third connection becomes a spectator. Spectators are capped at 8 when they join (2 players + 8 spectators = 10 sockets). Upgrades are never refused, so a player reclaiming a held seat can always get back in: a socket that hasn't sent `join` within 10 seconds is closed (`4003`), and past 2 such sockets the oldest is closed to make room.
-4. `move`: run `validateMove`, then `applyMove`, save state to DO SQLite storage (so it survives hibernation), and broadcast `state`.
-5. Both players ask for a rematch: swap who goes first, reset the board, increment the round counter, and keep the score.
-6. Disconnect: mark the seat `disconnected` and keep it for 2 minutes so the player can reconnect. The other player is told.
-7. `alarm()`: if nothing has happened for 30 minutes, close the sockets and run `ctx.storage.deleteAll()`. Otherwise push the alarm back.
+**Lobby rules** (in `game-core`; the Durable Object runs the effects):
+1. Create: `POST /init` stores `{code, game, createdAt}` with phase `waiting`, round 1 and X first, and sets the alarm.
+2. Connect: `ctx.acceptWebSocket(ws, [connId])` (hibernation). Each socket's attachment holds `{connId, role, openedAt}`. Upgrades are never refused, so a player reclaiming a held seat can always get back in. A socket that hasn't sent `join` within 10 seconds is closed (`4003`), and past 2 unjoined sockets the oldest is closed to make room.
+3. `join`: a token that matches a seat gives that seat back (reconnect). If another socket still holds the seat, that socket is closed with `4000` first. Without a matching token the player takes the first empty seat, X then O. A seat held for a disconnected player isn't empty. Every seated join gets a fresh token (`crypto.randomUUID`) and the old one stops working. If both seats are taken, the socket becomes a spectator (`token: null`). Spectators are capped at 8 when they join: the ninth gets `LOBBY_FULL` and close `4002`. Seat claims and token reconnects are never refused.
+4. When both seats are filled, the game starts.
+5. `move`: seated players only. `seq` must equal the current seq, then the server runs `validateMove` and `applyMove`. A finished game updates the score.
+6. Both players ask for a rematch after a game ends: the other seat moves first, the board resets, the round goes up by one and the score is kept.
+7. Disconnect: the seat is held for 2 minutes so the player can reconnect. The other player sees a countdown from `releaseAt`. `leave` releases the seat at once.
+8. Seat release (grace period over, or `leave`): the seat empties and the match resets for whoever is left: phase `waiting`, round 1, X first, score cleared. A new opponent means a new match.
+9. `alarm()`: runs at the earliest seat release, join timeout or idle expiry. If there has been no client message or connection for 30 minutes, it closes every socket with `4001` and runs `ctx.storage.deleteAll()`.
 
-**Abuse controls:** lobby creation is capped at 10 per minute per IP (Workers
-Rate Limiting binding, or a Cloudflare WAF rate-limit rule as a fallback).
-Display names are 1–20 characters, trimmed and HTML-escaped when rendered.
-Unknown message types close the socket with code 1008. Each socket can send at
-most 10 messages per second.
+The record is saved to SQLite-backed storage (`ctx.storage.kv`) after every change,
+so it survives hibernation and eviction. `seq` goes up by one on every change,
+and each change is broadcast to every joined socket as a full `state`. A
+spectator joining or leaving broadcasts the new count without changing `seq`, so
+spectators can't make a player's move fail with `STALE_STATE`.
+
+**Abuse controls:** lobby creation is capped at 10 per minute per client IP by
+the Workers Rate Limiting binding `LOBBY_CREATE_LIMITER`, keyed on
+`CF-Connecting-IP`. IPv6 addresses are grouped by their /64, so rotating
+addresses inside one subscriber's block doesn't reset the limit. The check runs
+before the body is read, so malformed requests use up the quota too. If the
+binding isn't available, a Cloudflare WAF rate-limit rule on `POST /api/lobbies`
+is the fallback. WebSocket upgrades whose `Origin` is another site get 403.
+Display names are 1–20 characters, trimmed, must contain a visible character,
+and can't contain control or bidi-override characters. React escapes them when
+rendered. Each socket can send at most 10 messages per second.
+
+**Testing:** `@cloudflare/vitest-pool-workers` doesn't support vitest 5, so the
+Worker and the Durable Object are unit-tested in Node with fakes. Playwright
+covers the real runtime against `vite preview` (workerd): the HTTP API, the
+protocol (including hibernation) and two players in separate browser contexts.
 
 ### 4.6 Caching
 
@@ -339,7 +416,7 @@ most 10 messages per second.
 
 - **Build:** schema violations, broken internal links, unknown categories or tags without an alias, and duplicate slugs all fail the build and print the file and line.
 - **Client:** route-level error boundaries and a 404 page. Search falls back to plain substring matching if the index fails to load.
-- **Game client:** reconnects with exponential backoff (0.5, 1, 2, 4, 8 s, then gives up with a "Reconnect" button) and replays `join` with the stored token. Server `error` messages show as toasts and leave the board unchanged.
+- **Game client:** reconnects with exponential backoff (0.5, 1, 2, 4, 8 s, then gives up with a "Reconnect" button) and replays `join` with the stored token. Close codes `4000`, `4001` and `1008` don't reconnect (§4.5). Server `error` messages show as toasts, and an optimistic move that the server refuses is undone.
 - **Worker:** wraps handlers in try/catch, returns JSON errors, and logs structured JSON to Workers Logs.
 
 ### 4.8 Security
@@ -388,7 +465,7 @@ plus Cloudflare billing and usage notifications.
 | Cloudflare instead of a Python VPS | $0 hosting, no servers to run, edge latency, WebSockets built in | Python for the backend. Some lock-in through the Durable Objects API. | You need heavy Python-only libraries (ML or data work) on the backend. You could then add a small Python service beside this one. |
 | Content as code | Versioning, review in PRs, $0, prerendered SEO | Can't publish from a phone. Non-technical editors can't help. | You want to post from mobile. Add a git-based CMS (Decap or TinaCMS) or D1 plus an admin route behind Cloudflare Access. |
 | Client-side search | Results on every keystroke, no backend | Index download size. No search analytics. | The gzipped index goes over 300 KB or there are more than 5k documents. Then move to D1 FTS5 or Pagefind. |
-| One DO per lobby | Strong consistency, simple code | Tied to Cloudflare's runtime | Moving off Cloudflare. `game-core` is portable, so only about 200 lines of transport code would need rewriting. |
+| One DO per lobby | Strong consistency, simple code | Tied to Cloudflare's runtime | Moving off Cloudflare. `game-core` is portable, so only about 450 lines of transport code (`worker/api.ts` and `worker/game-lobby.ts`) would need rewriting. |
 | R2 with manual upload script | Free, fast, large files kept out of git | You run a script for each batch of photos | Lots of photos. Add a `workflow_dispatch` job or a small upload page. |
 
 ---
@@ -410,5 +487,5 @@ plus Cloudflare billing and usage notifications.
 1. ~~**Domain name:** which name and which TLD?~~ **Decided:** `ry-mart.com`, registered at Cloudflare. Photos are served from `photos.ry-mart.com`.
 2. **Public or private repo?** A public repo gets unlimited Actions minutes. A private one gets 2,000 minutes a month, which is still plenty.
 3. **Resume privacy:** show phone and address, or only e-mail and LinkedIn?
-4. **Should game lobbies allow spectators?** The design assumes yes, up to 8.
+4. ~~**Should game lobbies allow spectators?**~~ **Decided:** yes, up to 8 per lobby. The next one is told the lobby is full.
 5. **Analytics:** is Cloudflare Web Analytics (cookieless, so no cookie banner) acceptable?

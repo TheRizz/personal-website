@@ -194,26 +194,40 @@ from the nav yet.
 
 ## Phase 7: Game engine (server)
 
+> **Built 2026-10-12.** Deviations from the plan: `@cloudflare/vitest-pool-workers` needs
+> vitest 4 and the repo uses vitest 5, so the Worker and the Durable Object are unit-tested in
+> Node with fakes. Playwright tests against `vite preview` (workerd) cover the real runtime,
+> including hibernation, so the "Done when" checks for Steps 7.2 and 7.3 are met that way. The
+> lobby rules are a pure state machine in `game-core`, and the DO only stores the record and runs
+> its effects. The DO stays a plain class, so the Worker calls it with `stub.fetch()` rather than
+> RPC. The protocol says `role` instead of `seat`, gives spectators a `null` token and adds the
+> errors `NOT_JOINED`, `NOT_A_PLAYER` and `STALE_STATE`. `init` takes the first seat and
+> `validateMove` returns a result object. The plan's 10-socket cap (refusing a full lobby with
+> 409) is replaced by a cap of 8 spectators at join (close 4002) and a 10-second join timeout
+> (close 4003), so a dropped player can always get back in. Spectators don't bump `seq`.
+> Releasing a seat resets the match. `POST /api/lobbies` also requires a JSON content type (415),
+> and WebSocket upgrades from another origin get 403. Design doc §4.5 has the details.
+
 ### Step 7.1: `game-core` package
-- [ ] The `GameDefinition<S, M>` interface (§4.5), `Seat` and `GameError` types, and zod protocol schemas for `ClientMsg` and `ServerMsg`.
-- [ ] `tictactoe` implementation: board of 9, X goes first, win lines, draw detection, `validateMove` that rejects occupied cells, out-of-range cells, the wrong seat and moves after the game has ended.
-- [ ] Exhaustive tests: all 8 win lines, a draw, and a property test (fast-check) that random legal play always ends within 9 moves.
+- [x] The `GameDefinition<S, M>` interface (§4.5), `Seat` and `GameError` types, and zod protocol schemas for `ClientMsg` and `ServerMsg`.
+- [x] `tictactoe` implementation: board of 9, X goes first, win lines, draw detection, `validateMove` that rejects occupied cells, out-of-range cells, the wrong seat and moves after the game has ended.
+- [x] Exhaustive tests: all 8 win lines, a draw, and a property test (fast-check) that random legal play always ends within 9 moves.
 
 **Done when:** 100% branch coverage on `tictactoe`.
 
 ### Step 7.2: Lobby HTTP API
-- [ ] `POST /api/lobbies` (code generation, collision retry, rate limit), `GET /api/lobbies/:code`, `GET /api/lobbies/:code/ws` (forwards the upgrade to the DO) (§4.5).
-- [ ] Rate limiting through the Workers Rate Limiting binding (or a WAF rule) at 10 per minute per IP.
-- [ ] JSON error format and `Cache-Control: no-store`.
+- [x] `POST /api/lobbies` (code generation, collision retry, rate limit), `GET /api/lobbies/:code`, `GET /api/lobbies/:code/ws` (forwards the upgrade to the DO) (§4.5).
+- [x] Rate limiting through the Workers Rate Limiting binding (or a WAF rule) at 10 per minute per IP.
+- [x] JSON error format and `Cache-Control: no-store`.
 
 **Done when:** integration tests with `@cloudflare/vitest-pool-workers` cover create → get → 404 for an unknown code → 429 after the limit.
 
 ### Step 7.3: `GameLobby` Durable Object
-- [ ] Uses the WebSocket Hibernation API (`acceptWebSocket`, `webSocketMessage`, `webSocketClose`) and `serializeAttachment` for seat and token.
-- [ ] Seat assignment, reconnect tokens (`crypto.randomUUID`), a 2-minute grace period on disconnect, spectators (max 10 sockets), and rematch.
-- [ ] State is saved to DO storage after every change. Full snapshots are broadcast.
-- [ ] Message validation, a 4 KB size cap, a limit of 10 messages per second per socket, and close code 1008 for bad clients.
-- [ ] `setWebSocketAutoResponse` handles ping/pong. `alarm()` removes the lobby after 30 minutes without activity.
+- [x] Uses the WebSocket Hibernation API (`acceptWebSocket`, `webSocketMessage`, `webSocketClose`) and `serializeAttachment` for seat and token.
+- [x] Seat assignment, reconnect tokens (`crypto.randomUUID`), a 2-minute grace period on disconnect, spectators (max 8, checked at join), and rematch.
+- [x] State is saved to DO storage after every change. Full snapshots are broadcast.
+- [x] Message validation, a 4 KB size cap, a limit of 10 messages per second per socket, and close code 1008 for bad clients.
+- [x] `setWebSocketAutoResponse` handles ping/pong. `alarm()` removes the lobby after 30 minutes without activity.
 
 **Done when:** worker integration tests cover a full game between two sockets, an out-of-turn move, an invalid message, a reconnect with a token, a third socket becoming a spectator, a rematch, and alarm cleanup.
 
@@ -221,22 +235,33 @@ from the nav yet.
 
 ## Phase 8: Game UI
 
+> **Built 2026-10-12.** Deviations from the plan: sound effects are not built, so that box in
+> Step 8.3 stays unticked. The disconnect notice counts down the time left on the held seat
+> ("Alice disconnected — seat held for 1:42") rather than a fixed "waiting 2:00".
+> `/games/tictactoe/:code` isn't prerendered: the Worker renders it on demand, a malformed code
+> gets the 404 page and a lowercase code redirects to the uppercase one. The join box also accepts
+> a pasted invite link. When the spectator cap is reached the page says "This game is full" and
+> offers Try again. When another tab takes the seat (close 4000), the old tab offers "Watch here".
+> The two-player Playwright tests use separate browser contexts against `vite preview`, and CI
+> runs them after the build.
+
 ### Step 8.1: Lobby screens
-- [ ] `/games`: list of games. `/games/tictactoe`: "Create game" and "Join with code" (input upper-cases and filters to the allowed alphabet).
-- [ ] After creating a lobby: show the code in large text, a "Copy invite link" button (`/games/tictactoe/:code`), and a "Waiting for opponent…" state.
-- [ ] Display-name prompt, remembered in `localStorage` inside try/catch.
+- [x] `/games`: list of games. `/games/tictactoe`: "Create game" and "Join with code" (input upper-cases and filters to the allowed alphabet).
+- [x] After creating a lobby: show the code in large text, a "Copy invite link" button (`/games/tictactoe/:code`), and a "Waiting for opponent…" state.
+- [x] Display-name prompt, remembered in `localStorage` inside try/catch.
 
 **Done when:** creating a lobby and opening the invite link in a second browser puts both players on the game screen.
 
 ### Step 8.2: Game client hook and board
-- [ ] `useGameSocket(code)` hook: connect, `join` with a stored token (`sessionStorage` per code), reconnect with backoff, and expose `state`, `seat`, `send` and `connectionStatus`.
-- [ ] `TicTacToeBoard`: accessible grid of buttons with ARIA labels, highlighted win line, turn indicator, score, rematch button and connection badge.
-- [ ] Optimistic move using `game-core.validateMove` on the client, then reconcile with the server snapshot.
+- [x] `useGameSocket(code)` hook: connect, `join` with a stored token (`sessionStorage` per code), reconnect with backoff, and expose `state`, `seat`, `send` and `connectionStatus`.
+- [x] `TicTacToeBoard`: accessible grid of buttons with ARIA labels, highlighted win line, turn indicator, score, rematch button and connection badge.
+- [x] Optimistic move using `game-core.validateMove` on the client, then reconcile with the server snapshot.
 
 **Done when:** a Playwright test with two browser contexts covers create → join → X wins → rematch → O moves first → draw. A refresh mid-game keeps the same seat.
 
 ### Step 8.3: Game polish ⇄
-- [ ] Error toasts mapped from server error codes, a friendly "Lobby not found/expired" page, a "Opponent disconnected — waiting 2:00" countdown, and simple sound effects (muted by default).
+- [x] Error toasts mapped from server error codes, a friendly "Lobby not found/expired" page and a "Opponent disconnected — waiting 2:00" countdown.
+- [ ] Simple sound effects (muted by default). Not built.
 
 **Done when:** each error path in the Step 8.2 test suite shows the correct user-facing message.
 
