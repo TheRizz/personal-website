@@ -2,9 +2,11 @@ import {
   CLOSE_CODES,
   JOIN_TIMEOUT_MS,
   LOBBY_IDLE_TTL_MS,
+  MAX_SOCKETS_PER_LOBBY,
   MAX_SPECTATORS_PER_LOBBY,
   MAX_UNJOINED_SOCKETS,
   RECONNECT_GRACE_MS,
+  UNJOINED_GRACE_MS,
   serverMsgSchema,
   type LobbyRecord,
   type ServerMsg,
@@ -151,6 +153,7 @@ async function connect(t: Setup): Promise<FakeSocket> {
 }
 
 const ws = (socket: FakeSocket) => socket as unknown as WebSocket;
+type Attachment = { connId: string; role: string | null; openedAt: number };
 
 async function send(t: Setup, socket: FakeSocket, msg: unknown) {
   await t.lobby.webSocketMessage(ws(socket), typeof msg === "string" ? msg : JSON.stringify(msg));
@@ -244,6 +247,7 @@ describe("GameLobby /ws", () => {
       sockets.push(await connect(t));
       now += 1;
     }
+    // All of them are young enough to be mid-join, so only the hard cap closes any.
     const timedOut = { code: CLOSE_CODES.joinTimeout, reason: "Join timed out" };
     expect(sockets.map((s) => s.closed)).toEqual([
       timedOut,
@@ -277,6 +281,78 @@ describe("GameLobby /ws", () => {
     expect(fresh.closed).toBeNull();
   });
 
+  it("closes stale unjoined sockets, oldest first, past the lobby's free places", async () => {
+    const t = setup();
+    await init(t.lobby);
+    await join(t, "Xena");
+    await join(t, "Oscar");
+    for (let i = 0; i < MAX_SPECTATORS_PER_LOBBY; i++) await join(t, `Fan ${i}`);
+    // The lobby is full, which leaves room for the two seat holders' token reconnects.
+    const squatters = [await connect(t), await connect(t), await connect(t)];
+    expect(squatters.map((s) => s.closed)).toEqual([null, null, null]);
+
+    // Once they are past the grace period, they no longer count as mid-join.
+    now += UNJOINED_GRACE_MS;
+    const fresh = await connect(t);
+    expect(squatters.map((s) => s.closed?.code ?? null)).toEqual([
+      CLOSE_CODES.joinTimeout,
+      CLOSE_CODES.joinTimeout,
+      null,
+    ]);
+    expect(fresh.closed).toBeNull();
+    // Just under the grace period, a socket is still left alone.
+    now += UNJOINED_GRACE_MS - 1;
+    await connect(t);
+    expect(fresh.closed).toBeNull();
+    expect(squatters[2]!.closed?.code).toBe(CLOSE_CODES.joinTimeout);
+  });
+
+  it("closes no one when a whole lobby reconnects at once after a restart", async () => {
+    const t = setup();
+    await init(t.lobby);
+    const x = await join(t, "Xena");
+    const o = await join(t, "Oscar");
+    const tokens = [x, o].map((s) => s.take().find((m) => m.t === "joined")?.token ?? undefined);
+    const fans = [];
+    for (let i = 0; i < MAX_SPECTATORS_PER_LOBBY; i++) fans.push(await join(t, `Fan ${i}`));
+    // A deploy drops every socket.
+    const everyone = [x, o, ...fans];
+    expect(everyone).toHaveLength(MAX_SOCKETS_PER_LOBBY);
+    for (const socket of everyone) {
+      await t.lobby.webSocketClose(ws(socket));
+      t.forget(socket);
+    }
+    t.lobby = t.make();
+
+    // Every client upgrades before any of their joins arrives...
+    const back = [];
+    for (let i = 0; i < everyone.length; i++) {
+      back.push(await connect(t));
+      now += 100;
+    }
+    // ...and then they all join, the seat holders with their tokens.
+    const names = ["Xena", "Oscar", ...fans.map((_, i) => `Fan ${i}`)];
+    for (const [i, socket] of back.entries()) {
+      await send(t, socket, {
+        t: "join",
+        name: names[i],
+        ...(tokens[i] ? { token: tokens[i] } : {}),
+      });
+    }
+    expect(back.map((s) => s.closed)).toEqual(Array<null>(everyone.length).fill(null));
+    expect(back.map((s) => s.take()[0])).toMatchObject([
+      { t: "joined", role: "X" },
+      { t: "joined", role: "O" },
+      ...Array(MAX_SPECTATORS_PER_LOBBY).fill({ t: "joined", role: "spectator" }),
+    ]);
+    const connId = (socket: FakeSocket | undefined) => (socket?.attachment as Attachment).connId;
+    expect(stored(t)?.seats).toMatchObject({
+      X: { connId: connId(back[0]), name: "Xena" },
+      O: { connId: connId(back[1]), name: "Oscar" },
+    });
+    expect(stored(t)?.phase).toBe("playing");
+  });
+
   it("lets a dropped player back in however many sockets sit unjoined", async () => {
     const t = setup();
     await init(t.lobby);
@@ -287,9 +363,9 @@ describe("GameLobby /ws", () => {
     await t.lobby.webSocketClose(ws(x));
     t.forget(x);
 
-    // Squatters open sockets and never join...
+    // Squatters open as many sockets as they may and never join...
     const squatters = [];
-    for (let i = 0; i < 3; i++) squatters.push(await connect(t));
+    for (let i = 0; i < MAX_UNJOINED_SOCKETS; i++) squatters.push(await connect(t));
     // ...but X still connects and reclaims the seat, and nothing is ever refused.
     o.take();
     const back = await join(t, "Xena", token);

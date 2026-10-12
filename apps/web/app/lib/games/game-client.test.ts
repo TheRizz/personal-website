@@ -86,8 +86,15 @@ function setup({
   };
 }
 
-beforeEach(() => vi.useFakeTimers());
-afterEach(() => vi.useRealTimers());
+beforeEach(() => {
+  vi.useFakeTimers();
+  // No reconnect jitter: each delay is exactly its RECONNECT_DELAYS_MS entry.
+  vi.spyOn(Math, "random").mockReturnValue(0.5);
+});
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe("GameClient", () => {
   it("joins with the stored token and stores the new one", () => {
@@ -160,7 +167,9 @@ describe("GameClient", () => {
     last().open();
     last().receive({ t: "joined", role: "X", token: NEW_TOKEN });
 
-    for (const [index, delay] of [500, 1000, 2000, 4000, 8000].entries()) {
+    // The delays are jittered: the lowest random draw makes each one 25% shorter.
+    vi.mocked(Math.random).mockReturnValue(0);
+    for (const [index, delay] of [375, 750, 1500, 3000, 6000].entries()) {
       last().drop(1006);
       expect(client.getSnapshot()).toMatchObject({
         connection: "reconnecting",

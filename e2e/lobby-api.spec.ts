@@ -3,6 +3,7 @@ import {
   CLOSE_CODES,
   LOBBY_CREATE_LIMIT_PER_MINUTE,
   MAX_MESSAGE_BYTES,
+  MAX_SOCKETS_PER_LOBBY,
   MAX_SPECTATORS_PER_LOBBY,
   MAX_UNJOINED_SOCKETS,
   RECONNECT_GRACE_MS,
@@ -229,8 +230,9 @@ test.describe("WebSocket handshake", () => {
     x.client.close();
     await o.client.next("state", (m) => m.state.players.X?.connected === false);
 
-    // More idle sockets than MAX_UNJOINED_SOCKETS: the oldest is closed to make room. (Each
-    // pings first: locally, a close for a socket that never sent a frame doesn't reach it.)
+    // More idle sockets than MAX_UNJOINED_SOCKETS (the hard cap, which applies however young they
+    // are): the oldest is closed to make room. (Each pings first: locally, a close for a socket
+    // that never sent a frame doesn't reach it.)
     const squatters = [];
     for (let i = 0; i <= MAX_UNJOINED_SOCKETS; i++) {
       const squatter = await lobby.connect();
@@ -247,6 +249,21 @@ test.describe("WebSocket handshake", () => {
     const back = await lobby.join("Xena", x.joined.token!);
     expect(back.joined).toMatchObject({ t: "joined", role: "X" });
     expect(back.state.state.players.X).toMatchObject({ connected: true, releaseAt: null });
+  });
+
+  test("a whole lobby connecting at once all get in", async ({ lobby }) => {
+    // Every socket is open before any of them joins, as after a deploy or a shared invite link.
+    const clients = await Promise.all(
+      Array.from({ length: MAX_SOCKETS_PER_LOBBY }, () => lobby.connect()),
+    );
+    clients.forEach((client, i) => client.send({ t: "join", name: `Guest ${i}` }));
+    const joined = await Promise.all(clients.map((client) => client.next("joined")));
+    expect(joined.map((m) => m.role).sort()).toEqual(
+      ["O", "X", ...Array<string>(MAX_SPECTATORS_PER_LOBBY).fill("spectator")].sort(),
+    );
+    expect(clients.map((client) => client.closeInfo)).toEqual(
+      Array<null>(MAX_SOCKETS_PER_LOBBY).fill(null),
+    );
   });
 
   test("a full lobby refuses another spectator but lets a dropped player back in", async ({

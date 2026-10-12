@@ -10,11 +10,18 @@ export const MAX_MESSAGE_BYTES = 4096;
  */
 export const MAX_SOCKETS_PER_LOBBY = 10;
 /**
- * Sockets that are open but haven't sent `join`. The Durable Object never refuses an upgrade for
- * these: past the limit it closes the oldest one (CLOSE_CODES.joinTimeout), so sockets that never
- * join can't keep a player reclaiming a held seat out.
+ * Hard cap on sockets that are open but haven't sent `join`: room for a whole lobby (2 players and
+ * 8 spectators) plus both seat holders reconnecting at once. The Durable Object never refuses an
+ * upgrade: past the cap it closes the oldest unjoined socket (CLOSE_CODES.joinTimeout), so sockets
+ * that never join can't keep a player reclaiming a held seat out.
  */
-export const MAX_UNJOINED_SOCKETS = 2;
+export const MAX_UNJOINED_SOCKETS = MAX_SOCKETS_PER_LOBBY + 2;
+/**
+ * An unjoined socket younger than this may still be mid-join (its `join` is one round trip away),
+ * so it is only closed to stay under MAX_UNJOINED_SOCKETS. Older ones are also closed, oldest
+ * first, once the unjoined sockets outnumber the lobby's free places.
+ */
+export const UNJOINED_GRACE_MS = 3_000;
 /** A socket that hasn't sent `join` this long after connecting is closed (CLOSE_CODES.joinTimeout). */
 export const JOIN_TIMEOUT_MS = 10_000;
 /** A join that would add a spectator past this is refused with LOBBY_FULL (close 4002). */

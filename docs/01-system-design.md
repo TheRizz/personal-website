@@ -344,7 +344,7 @@ the object and are not billed.
 | `4000` | Another socket joined with this seat's token, for example a duplicated tab. The seat moves to the new socket. | No. The old tab offers "Watch here". |
 | `4001` | The lobby was idle for 30 minutes and has been deleted | No |
 | `4002` | Lobby full: both seats are taken and 8 spectators are watching | Yes, with backoff |
-| `4003` | The socket didn't send `join` within 10 s, or a newer socket needed its slot | Yes, with backoff |
+| `4003` | The socket didn't send `join` within 10 s, or it sat unjoined while newer sockets needed room (see Lobby rules, step 2) | Yes, with backoff |
 
 **`game-core` abstraction** (pure functions, unit-tested, shared by browser and DO):
 
@@ -372,7 +372,7 @@ would become a union of the games' states.
 
 **Lobby rules** (in `game-core`; the Durable Object runs the effects):
 1. Create: `POST /init` stores `{code, game, createdAt}` with phase `waiting`, round 1 and X first, and sets the alarm.
-2. Connect: `ctx.acceptWebSocket(ws, [connId])` (hibernation). Each socket's attachment holds `{connId, role, openedAt}`. Upgrades are never refused, so a player reclaiming a held seat can always get back in. A socket that hasn't sent `join` within 10 seconds is closed (`4003`), and past 2 unjoined sockets the oldest is closed to make room.
+2. Connect: `ctx.acceptWebSocket(ws, [connId])` (hibernation). Each socket's attachment holds `{connId, role, openedAt}`. Upgrades are never refused, so a player reclaiming a held seat can always get back in. A socket that hasn't sent `join` within 10 seconds is closed (`4003`). When an upgrade arrives, older unjoined sockets are also closed (`4003`), oldest first, to make room for it. That happens only past the lobby's free places (10 minus joined sockets, plus 2 so both seat holders can reconnect) and only for sockets older than 3 seconds. A younger socket may be a client whose `join` is still on its way, for example when a whole lobby reconnects after a deploy. There is also a hard cap of 12 unjoined sockets of any age, past which the oldest is closed, so sockets that never join can't pile up.
 3. `join`: a token that matches a seat gives that seat back (reconnect). If another socket still holds the seat, that socket is closed with `4000` first. Without a matching token the player takes the first empty seat, X then O. A seat held for a disconnected player isn't empty. Every seated join gets a fresh token (`crypto.randomUUID`) and the old one stops working. If both seats are taken, the socket becomes a spectator (`token: null`). Spectators are capped at 8 when they join: the ninth gets `LOBBY_FULL` and close `4002`. Seat claims and token reconnects are never refused.
 4. When both seats are filled, the game starts.
 5. `move`: seated players only. `seq` must equal the current seq, then the server runs `validateMove` and `applyMove`. A finished game updates the score.
@@ -416,7 +416,7 @@ protocol (including hibernation) and two players in separate browser contexts.
 
 - **Build:** schema violations, broken internal links, unknown categories or tags without an alias, and duplicate slugs all fail the build and print the file and line.
 - **Client:** route-level error boundaries and a 404 page. Search falls back to plain substring matching if the index fails to load.
-- **Game client:** reconnects with exponential backoff (0.5, 1, 2, 4, 8 s, then gives up with a "Reconnect" button) and replays `join` with the stored token. Close codes `4000`, `4001` and `1008` don't reconnect (§4.5). Server `error` messages show as toasts, and an optimistic move that the server refuses is undone.
+- **Game client:** reconnects with exponential backoff (about 0.5, 1, 2, 4, 8 s, each ±25% random jitter so clients dropped together don't retry in lockstep, then gives up with a "Reconnect" button) and replays `join` with the stored token. Close codes `4000`, `4001` and `1008` don't reconnect (§4.5). Server `error` messages show as toasts, and an optimistic move that the server refuses is undone.
 - **Worker:** wraps handlers in try/catch, returns JSON errors, and logs structured JSON to Workers Logs.
 
 ### 4.8 Security

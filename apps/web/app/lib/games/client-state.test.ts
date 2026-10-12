@@ -10,6 +10,7 @@ import {
   planMove,
   reconnectDelay,
   RECONNECT_DELAYS_MS,
+  RECONNECT_JITTER,
   viewState,
   type ClientAction,
   type ClientState,
@@ -152,11 +153,27 @@ describe("close codes", () => {
 });
 
 describe("reconnectDelay", () => {
-  it("backs off 0.5, 1, 2, 4, 8 seconds then stops", () => {
+  it("backs off about 0.5, 1, 2, 4, 8 seconds then stops", () => {
     expect(RECONNECT_DELAYS_MS).toEqual([500, 1000, 2000, 4000, 8000]);
-    expect([1, 2, 3, 4, 5].map(reconnectDelay)).toEqual([500, 1000, 2000, 4000, 8000]);
+    const delays = (r: number) =>
+      [1, 2, 3, 4, 5].map((attempt) => reconnectDelay(attempt, () => r));
+    expect(delays(0.5)).toEqual([500, 1000, 2000, 4000, 8000]);
     expect(reconnectDelay(6)).toBeNull();
     expect(reconnectDelay(0)).toBeNull();
+  });
+
+  it(`spreads each delay by ±${RECONNECT_JITTER * 100}% so dropped clients don't retry in lockstep`, () => {
+    expect(reconnectDelay(1, () => 0)).toBe(375);
+    expect(reconnectDelay(1, () => 0.999_999)).toBe(625);
+    expect(reconnectDelay(5, () => 0)).toBe(6000);
+    expect(reconnectDelay(5, () => 0.999_999)).toBe(10_000);
+    // With the default random source the delays differ from client to client.
+    const samples = new Set(Array.from({ length: 50 }, () => reconnectDelay(1)));
+    expect(samples.size).toBeGreaterThan(1);
+    for (const delay of samples) {
+      expect(delay).toBeGreaterThanOrEqual(375);
+      expect(delay).toBeLessThanOrEqual(625);
+    }
   });
 });
 

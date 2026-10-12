@@ -2,7 +2,10 @@ import {
   CLOSE_CODES,
   JOIN_TIMEOUT_MS,
   MAX_MESSAGES_PER_SECOND,
+  MAX_SOCKETS_PER_LOBBY,
   MAX_UNJOINED_SOCKETS,
+  SEATS,
+  UNJOINED_GRACE_MS,
   closeConnection,
   createLobby,
   handleAlarm,
@@ -129,8 +132,8 @@ export class GameLobby implements DurableObject {
     const now = Date.now();
     // Joined sockets are capped by game-core (2 seats + MAX_SPECTATORS_PER_LOBBY), so an upgrade is
     // never refused: a player reclaiming a held seat must always get in. Sockets that don't join
-    // are closed after JOIN_TIMEOUT_MS, and the oldest makes room for this one past the limit.
-    this.closeUnjoined(now, MAX_UNJOINED_SOCKETS - 1);
+    // are closed after JOIN_TIMEOUT_MS, and older ones make room for this one past the limits.
+    this.closeUnjoined(now, true);
     const { 0: client, 1: server } = new WebSocketPair();
     const connId = crypto.randomUUID();
     this.ctx.acceptWebSocket(server, [connId]);
@@ -192,20 +195,33 @@ export class GameLobby implements DurableObject {
     await this.ctx.storage.setAlarm(Math.min(nextAlarmAt(lobby), ...joinDeadlines));
   }
 
-  /** Closes unjoined sockets past JOIN_TIMEOUT_MS, then the oldest ones until `keep` are left. */
-  private closeUnjoined(now: number, keep = Number.POSITIVE_INFINITY): void {
-    const unjoined = this.unjoinedSockets();
-    const reason = "Join timed out";
-    unjoined.forEach(({ conn }, i) => {
-      if (now - conn.openedAt >= JOIN_TIMEOUT_MS || unjoined.length - i > keep) {
-        this.close(conn.connId, CLOSE_CODES.joinTimeout, reason);
+  /**
+   * Closes unjoined sockets past JOIN_TIMEOUT_MS. With `makeRoom` (an upgrade is about to add one),
+   * it then closes the oldest ones until the new socket fits: any age past MAX_UNJOINED_SOCKETS, and
+   * past the lobby's free places only those older than UNJOINED_GRACE_MS. A younger socket may be
+   * a client whose `join` is still in flight, e.g. a whole lobby reconnecting after a deploy.
+   */
+  private closeUnjoined(now: number, makeRoom = false): void {
+    const live = this.liveSockets();
+    const unjoined = this.unjoinedSockets(live);
+    const joined = live.length - unjoined.length;
+    // Free places, plus both seats: a token reconnect gets in even while its old socket lingers.
+    const freePlaces = Math.max(SEATS.length, MAX_SOCKETS_PER_LOBBY + SEATS.length - joined);
+    const keep = makeRoom ? MAX_UNJOINED_SOCKETS - 1 : Number.POSITIVE_INFINITY;
+    const keepStale = makeRoom ? freePlaces - 1 : Number.POSITIVE_INFINITY;
+    let open = unjoined.length;
+    for (const { conn } of unjoined) {
+      const age = now - conn.openedAt;
+      if (age >= JOIN_TIMEOUT_MS || open > keep || (age >= UNJOINED_GRACE_MS && open > keepStale)) {
+        this.close(conn.connId, CLOSE_CODES.joinTimeout, "Join timed out");
+        open -= 1;
       }
-    });
+    }
   }
 
   /** Live sockets that haven't joined, oldest first. */
-  private unjoinedSockets(): LiveSocket[] {
-    return this.liveSockets()
+  private unjoinedSockets(live = this.liveSockets()): LiveSocket[] {
+    return live
       .filter(({ conn }) => conn.role === null)
       .sort((a, b) => a.conn.openedAt - b.conn.openedAt);
   }

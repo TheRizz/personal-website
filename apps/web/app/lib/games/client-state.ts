@@ -15,7 +15,10 @@ import {
  * effects (timers, sockets, storage); everything here is deterministic and unit-tested.
  */
 
-/** Delays before each automatic reconnect attempt; after the last one the client gives up. */
+/**
+ * Base delays before each automatic reconnect attempt (jittered by RECONNECT_JITTER); after the
+ * last one the client gives up.
+ */
 export const RECONNECT_DELAYS_MS = [500, 1000, 2000, 4000, 8000] as const;
 export const MAX_RECONNECT_ATTEMPTS = RECONNECT_DELAYS_MS.length;
 /** Keepalive interval for the bare "ping" frame (answered by the server without waking it). */
@@ -113,9 +116,17 @@ export function errorText(code: ClientError["code"]): string {
   return ERROR_TEXT[code];
 }
 
-/** Delay before automatic reconnect attempt `attempt` (1-based), or null when out of attempts. */
-export function reconnectDelay(attempt: number): number | null {
-  return RECONNECT_DELAYS_MS[attempt - 1] ?? null;
+/** Each reconnect delay is scaled by a random factor in [1 - jitter, 1 + jitter). */
+export const RECONNECT_JITTER = 0.25;
+
+/**
+ * Delay before automatic reconnect attempt `attempt` (1-based), or null when out of attempts.
+ * Jittered so that clients dropped together (e.g. by a deploy) don't all reconnect in lockstep.
+ */
+export function reconnectDelay(attempt: number, random: () => number = Math.random): number | null {
+  const base = RECONNECT_DELAYS_MS[attempt - 1];
+  if (base === undefined) return null;
+  return Math.round(base * (1 - RECONNECT_JITTER + random() * 2 * RECONNECT_JITTER));
 }
 
 /** What a WebSocket close code means for the client. */
