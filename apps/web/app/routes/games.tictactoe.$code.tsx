@@ -47,7 +47,7 @@ export default function TicTacToeGame({ loaderData: { code } }: Route.ComponentP
 
   return (
     <>
-      <PageHeading title="Tic-tac-toe">
+      <PageHeading title="Tic-tac-toe" compact>
         Game <span className="font-mono tracking-[0.08em] text-fg">{code}</span>
       </PageHeading>
       {savedName === undefined ? (

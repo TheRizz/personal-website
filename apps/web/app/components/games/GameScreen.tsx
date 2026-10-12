@@ -58,7 +58,7 @@ export function GameScreen({
   }
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4">
       <p className="sr-only" aria-live="polite">
         {announced}
       </p>
@@ -205,11 +205,14 @@ function Match({
   }, [state.round]);
 
   return (
-    <div className="space-y-4 sm:space-y-6">
+    <div className="space-y-4 sm:space-y-3">
       <PlayerBar state={state} role={role} />
-      {/* Always two lines tall, so the board doesn't move when the text wraps on some turns. */}
+      {/*
+        Two lines tall on phones, so the board doesn't move when the text wraps on some turns.
+        From `sm` up one line is enough: "Waiting for" a long 20-letter name still fits.
+      */}
       <p
-        className={`flex min-h-[2lh] items-center justify-center text-center text-2xl leading-tight font-extrabold tracking-[-0.03em] text-balance sm:text-4xl ${
+        className={`flex min-h-[2lh] items-center justify-center text-center text-2xl leading-tight font-extrabold tracking-[-0.03em] text-balance sm:min-h-[1lh] sm:text-4xl ${
           headline.outcome === "lose" || (!headline.outcome && !(headline.yourMove && connected))
             ? "text-muted"
             : "text-fg"

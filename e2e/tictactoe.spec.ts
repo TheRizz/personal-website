@@ -4,6 +4,7 @@ import {
   type Browser,
   type BrowserContext,
   type BrowserContextOptions,
+  type Locator,
   type Page,
   type WebSocketRoute,
 } from "@playwright/test";
@@ -614,6 +615,44 @@ test.describe("tic-tac-toe in the browser", () => {
 
     await bob.close();
     await expect(alice.getByText(/^Bob disconnected — seat held/)).toBeInViewport();
+  });
+
+  test("on a laptop screen the whole game fits without scrolling", async ({ open }) => {
+    const alice = (await open({ viewport: { width: 1280, height: 800 } })).page;
+    const bob = (await open()).page;
+    const code = await createGame(alice, "Alice");
+    await acceptInvite(bob, code, "Christopher Long");
+    await expect(headline(alice, "Your move")).toBeVisible();
+
+    const fits = async (locator: Locator) => {
+      const box = await locator.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.y).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(800);
+    };
+    const scrollY = () => alice.evaluate(() => window.scrollY);
+
+    // Opening the game: nothing to scroll into view, so the site header stays on screen.
+    await alice.reload();
+    await expect(headline(alice, "Your move")).toBeVisible();
+    await sleep(500);
+    expect(await scrollY()).toBe(0);
+    await fits(board(alice));
+    const top = (await board(alice).boundingBox())!.y;
+
+    // The longest realistic headline is still one line, so the board doesn't move.
+    await cell(alice, 0).click();
+    await expect(headline(alice, "Waiting for Christopher Long")).toBeVisible();
+    expect((await board(alice).boundingBox())!.y).toBe(top);
+
+    await playMoves(bob, alice, [3, 1, 4, 2], ["O", "X"]);
+    await expect(headline(alice, "You win")).toBeVisible();
+    const playAgain = alice.getByRole("button", { name: "Play again" });
+    await expect(playAgain).toBeVisible();
+    await sleep(500);
+    expect(await scrollY()).toBe(0);
+    await fits(board(alice));
+    await fits(playAgain);
   });
 
   test("joining from an invite moves focus to the game and says who you are", async ({ open }) => {

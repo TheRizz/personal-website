@@ -10,6 +10,13 @@ const ARROW_STEPS: Record<string, number> = {
   ArrowDown: 3,
 };
 
+/**
+ * At most 22rem wide. From `sm` up it also shrinks with the viewport height (33rem is roughly the
+ * site header, the players and headline above the board and "Play again" below it), down to 72px
+ * cells, so the whole game fits a laptop screen without scrolling. Phones are limited by width.
+ */
+const BOARD_WIDTH = "max-w-[22rem] sm:max-w-[clamp(14.75rem,100svh_-_33rem,22rem)]";
+
 /** Moves focus between cells with the arrow keys (Tab still works too). */
 function onArrowKey(event: KeyboardEvent<HTMLButtonElement>, index: number) {
   const step = ARROW_STEPS[event.key];
@@ -60,7 +67,7 @@ export function TicTacToeBoard({
     <div
       role="group"
       aria-label="Tic-tac-toe board"
-      className={`mx-auto grid w-full max-w-[22rem] grid-cols-3 gap-2 transition-opacity duration-300 sm:gap-2.5 ${
+      className={`mx-auto grid w-full ${BOARD_WIDTH} grid-cols-3 gap-2 transition-opacity duration-300 sm:gap-2.5 ${
         dimmed ? "opacity-50" : ""
       }`}
     >
