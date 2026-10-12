@@ -41,7 +41,7 @@ purchase, setup and operations guide is in
 | **Security** | No secrets in the browser. Strict security headers. Game messages are validated against a schema. Lobby creation is rate limited. Admin routes are gated twice: by Cloudflare Access at the edge and by a JWT check in the Worker. |
 | **Privacy** | The repo is public, so draft text, draft image keys, the owner's e-mail and test keys never go into git. A post becomes public only when the owner clicks Publish. |
 | **Maintainability** | One repo, one language (TypeScript) on both client and server, and game rules shared between client and server. |
-| **Authoring** | Blog posts are written in the owner-only editor (§4.9) or by hand as Markdown. Either way the published post is a Markdown file in git. Other content is still Markdown or YAML published by `git push`. Publishing from the editor takes about 4 minutes. |
+| **Authoring** | Blog posts are written in the owner-only editor (§4.9) or by hand as Markdown. Either way the published post is a Markdown file in git. Other content is still Markdown or YAML published by `git push`. Publishing from the editor opens a PR that the owner merges; the post is live about a minute after the merge. |
 
 ### 1.3 Constraints and assumptions
 
@@ -64,7 +64,7 @@ purchase, setup and operations guide is in
 | D6 | Photos | **Cloudflare R2** bucket. Resized variants are made by a script, and a manifest is kept in the repo. | Git LFS; Cloudinary | 10 GB free and no egress fees. Large binaries stay out of git. |
 | D7 | Language | **TypeScript everywhere**, in a pnpm monorepo | Python backend | The game rules package is shared by the browser (optimistic UI) and the server (authority). |
 | D8 | Owner access | **Cloudflare Access** path app on `/admin` and `/api/admin`, plus a JWT check in the Worker | Sign in with Google in the app; passkeys | $0, no auth code to own beyond a 60-line verifier, and the games' WebSockets keep working. See [ADR-0004](./adr/0004-owner-only-admin-access.md). |
-| D9 | Authoring | **TipTap editor in `/admin`**. Drafts in D1. Publish opens a GitHub App PR that auto-merges, so git stays the source of truth. | D1 as the source of truth with snapshot deploys; Decap CMS | Keeps ADR-0002 (history, PR checks, prerendering) and keeps drafts out of the public repo. See [ADR-0005](./adr/0005-in-browser-authoring.md). |
+| D9 | Authoring | **TipTap editor in `/admin`**. Drafts in D1. Publish opens a GitHub App PR that describes the post and its changes, and the owner merges it, so git stays the source of truth. | D1 as the source of truth with snapshot deploys; Decap CMS | Keeps ADR-0002 (history, PR checks, prerendering) and keeps drafts out of the public repo. See [ADR-0005](./adr/0005-in-browser-authoring.md). |
 
 > **Using Python instead:** if a Python API is a hard requirement, ADR-0001
 > describes the FastAPI + SQLite/Postgres + Caddy + Docker setup on a small VPS.
@@ -195,7 +195,7 @@ fails CI rather than appearing broken in production.
 title: "Building a WebSocket game on Durable Objects"
 slug: websocket-game-durable-objects   # optional; defaults to filename sans date
 date: 2026-10-20
-updated: 2026-10-22                    # optional
+updated: 2026-10-22                    # optional; the editor sets it on republish
 category: engineering                  # must exist in taxonomy.yaml
 tags: [cloudflare, websockets, typescript]
 summary: "One-paragraph summary used in cards, RSS and meta description."
@@ -258,7 +258,7 @@ otherwise free-form, lowercase and kebab-case.
 | `/` | prerender | Intro, latest posts, featured snippets and photos |
 | `/resume` | prerender | Also `/resume.pdf` (generated in CI) |
 | `/blog`, `/blog/category/:category` | prerender | Paginated and filterable by tag on the client |
-| `/blog/:slug` | prerender | Shiki-highlighted code, reading time, tags, prev/next |
+| `/blog/:slug` | prerender | Shiki-highlighted code, reading time, tags, prev/next. Shows "Published <date> · Updated <date>", the second part only when `updated` differs from `date`. |
 | `/snippets`, `/snippets/:slug` | prerender | Copy button, language filter |
 | `/photos`, `/photos/album/:album` | prerender | Masonry grid and lightbox. Uses `srcset` from R2 variants. |
 | `/tags`, `/tags/:tag` | prerender | Mixed list grouped by content type |
@@ -469,7 +469,7 @@ TipTap editor ── autosave ──────────▶ PUT /api/admin/d
   ├─ preview: renderMarkdown() runs in the browser, no Worker CPU
   ├─ image: resize, WebP, no EXIF ──▶ PUT /api/admin/images/:id/:w ──▶ R2 "photos"
   └─ Publish ───────────────────────▶ POST …/publish ── App token ──▶ commit on blog/<slug>-<t>
-                                                                      → PR → ci → auto-merge
+                                                                      → PR → ci → owner merges
                                                                       → deploy.yml → live
      status every 10 s ◀───────────── GET …/status ◀── PR checks, deploy run, /api/health
 ```
@@ -707,45 +707,61 @@ and checks the slug against `main` and open `blog/*` PRs. The Worker never runs
 unified or Shiki (10 ms CPU). CI is the final check.
 
 **Confirm dialog.** "Publishing makes this text public on a GitHub pull request
-now, about 4 minutes before it is live, and it stays in git history even if you
-cancel." The same wording shows for a typo fix on a live post: it also takes
-about 4 minutes.
+now. It goes live about a minute after you merge that PR, and it stays in git
+history even if you cancel." The same wording shows for a typo fix on a live
+post: it also needs a merge.
 
 **The file.** `content/blog/<YYYY-MM-DD>-<slug>.md`. The date is the owner's
 local date at first publish, and the slug comes from the title (editable until
 the first publish, then locked). Frontmatter is written value by value with
-`JSON.stringify` (valid YAML): `title`, `summary`, `date`, `updated` on edits,
-`category`, `tags`, and `cover` only when an imported post already had one.
-Never `slug` or `draft`.
+`JSON.stringify` (valid YAML): `title`, `summary`, `date`, `updated` on
+republish, `category`, `tags`, and `cover` only when an imported post already
+had one. Never `slug` or `draft`. `date` never changes after the first publish.
+Republishing a published post sets `updated` to the owner's local date at that
+publish.
 
-**Publish** (`POST /api/admin/drafts/:id/publish`, about 9 GitHub calls, under
-the 50-subrequest limit, all with a `User-Agent` and an installation token):
+**Publish** (`POST /api/admin/drafts/:id/publish`, at most about 10 GitHub
+calls, under the 50-subrequest limit, all with a `User-Agent` and an
+installation token):
 
 1. Mint the installation token (an RS256 App JWT, then `POST /app/installations/{id}/access_tokens`), cached in the isolate until close to expiry.
 2. `GET git/ref/heads/main` → commit M and tree T.
-3. For an edit, compare the file's blob SHA on M with `base_sha`. Different means someone changed it in git: `409`, and the editor offers to load the GitHub version. It never overwrites silently.
+3. For an edit, read the file on M (`GET contents` returns its blob SHA and text) and compare the SHA with `base_sha`. Different means someone changed it in git: `409`, and the editor offers to load the GitHub version. It never overwrites silently. The text is the old version for the PR's "What changed".
 4. `POST git/trees` with `base_tree: T`: the file, plus `sha: null` for an old path on unpublish.
 5. `POST git/commits` → C. Author: the owner's GitHub no-reply identity from the plain var `GIT_AUTHOR` (`TheRizz <19941577+TheRizz@users.noreply.github.com>`), never `OWNER_EMAIL`, which would go into public history. Committer: the App's bot. A unit test checks that no GitHub request body contains `OWNER_EMAIL`.
 6. `POST git/refs` → `refs/heads/blog/<slug>-<unix time>`.
-7. `POST pulls`. The body lists the slug, word count and image keys, nothing else.
-8. GraphQL `enablePullRequestAutoMerge` (squash, `expectedHeadOid: C`). There is no immediate-merge fallback. If GitHub says the PR is already mergeable, the required `ci` check is missing from the ruleset: the publish stops with "Repo settings changed: `ci` isn't required" and the PR waits for the owner.
+7. `POST pulls` with the title and body below. The Worker stops here: it never merges and never turns on auto-merge. The owner reviews the PR and merges it.
 
 Publishing again while that PR is open pushes a new commit to the same branch
-(`PATCH git/refs`, `force: false`) instead of opening a second PR.
+(`PATCH git/refs`, `force: false`) instead of opening a second PR, refreshes the
+body (`PATCH pulls`) and adds a comment saying what changed since the previous
+`publish` revision.
+
+**The PR.** Built from the post alone (never `OWNER_EMAIL`, draft ids or other
+drafts), so the owner can review it on GitHub, from a phone too:
+
+- **Title:** `Publish: <title>`, `Update: <title>` (the post is on `main`) or `Unpublish: <title>`.
+- **Overview:** `https://ry-mart.com/blog/<slug>`, summary, category and tags, reading time (the build's formula), "Created <date>" and, on an update, "Updated <date>".
+- **Images:** each figure inline as `![alt](https://photos.ry-mart.com/blog/<uuid>-1024.webp)` with its caption, so the alt text is reviewed beside the picture.
+- **What changed:** for an update, a table of the frontmatter fields that changed (old → new), then each body section (split at H2 and H3 lines) that was added, removed or edited, by heading, with its word-count change, and figures added or removed. For a new post, its section headings and word count. For an unpublish, the deleted path. Plain string work, well inside 10 ms of CPU.
+- **Review checklist** (task list): reads well; alt text and captions right; summary and tags right; nothing private in the text or images; `ci` green, then **Squash and merge**.
 
 **Status.** The editor polls every 10 s. The Worker makes one GraphQL query
 (PR state, checks, merge commit), then `GET actions/runs?head_sha=<merge>&event=push`,
 then reads `/api/health`. Stages: *PR #N opened → CI running (about 2 min) →
-merging → deploying (about 1 min) → Live*, where Live means `/api/health`
-reports the merge SHA. Then the draft's images get `published = 1`. On a CI
-failure: a link to the run, "Fix and republish" or "Cancel" (closes the PR,
-deletes the branch). On a deploy failure: a link to the run (one real deploy
-has already needed a manual re-run).
+waiting for your review (links to the PR) → merged → deploying (about 1 min) →
+Live*, where Live means `/api/health` reports the merge SHA. Then the draft's
+images get `published = 1`. A PR closed on GitHub without a merge puts the
+draft back to Draft. On a CI failure: a link to the run, "Fix and republish" or
+"Cancel" (closes the PR, deletes the branch). On a deploy failure: a link to
+the run (one real deploy has already needed a manual re-run).
 
 **Editing a published post.** `/api/admin/posts` lists `content/blog` on `main`
 with one GraphQL tree-and-blob query, cached by tree SHA. Edit imports the file
 into a draft (`kind: edit`, `source_path`, `base_sha`) or reuses the existing
-one. Publishing keeps the file name and `date` and sets `updated`.
+one. Publishing keeps the file name and `date` and sets `updated` to the
+publish day, and the post page shows both dates. The slug is locked, so a link
+that was copied and shared keeps working.
 
 **Unpublishing** is the same PR flow with a `sha: null` tree entry. The post
 leaves the site on the next deploy, but stays in public git history, and the UI
@@ -755,11 +771,11 @@ effect in seconds (hosting guide §6).
 **The App's reach.** Contents and Pull requests write, Actions and Checks read,
 no Workflows permission, installed on this repo only, and never a ruleset bypass
 actor. A second ruleset stops it from creating or updating any branch except
-`blog/**` (`main` changes only through a PR that passes `ci`). That still lets
-it merge, or turn on auto-merge for, **any** open PR whose `ci` is green
-(Dependabot's, the owner's unfinished work, or a stranger's fork PR), close
-PRs, and create tags (nothing deploys from a tag). Two guards limit what that
-can ship:
+`blog/**` (`main` changes only through a PR that passes `ci`). The Worker never
+calls a merge endpoint, but Contents and Pull requests write still let a stolen
+key merge **any** open PR whose `ci` is green (Dependabot's, the owner's
+unfinished work, or a stranger's fork PR), close PRs, and create tags (nothing
+deploys from a tag). Two guards limit what that can ship:
 
 - **`ci.yml`:** a first step, inline in the YAML and run before checkout and `pnpm install`, reads the PR's file list from the API and fails when the PR author is the bot, or any commit has the bot as committer, and a file outside `content/blog/` changed. It runs no script from the repo, because the Workflows permission protects only `.github/workflows/`, not `.github/scripts/`.
 - **`deploy.yml`:** runs on `main` after the merge. The App has no Workflows permission, so GitHub refuses its commits and merges that edit `.github/workflows/` (Step 10.8 confirms this). Before install, build or deploy, it fails when `github.actor`, or the author or merger of the PR behind the commit, is the bot and the compare API's file list for `<before>...<sha>` touches anything outside `content/blog/`. A failed deploy e-mails the owner, who reverts the merge.
@@ -779,7 +795,7 @@ hosting guide §2.10 checks it.
 | Malicious upload (SVG with script, polyglot, huge file) | Magic-byte allowlist that must match the recorded type, type set from the sniff, `nosniff`, inline disposition, 10 MB cap, owner only |
 | Private data in the public repo | Drafts only in D1. Owner e-mail and App key are Worker secrets, and commits use the no-reply author. EXIF stripped in the browser, and the Worker refuses files with metadata. PR body holds post content only. `*.pem` and `*.key` are gitignored, and the App key is converted outside the repo. Push protection is on. |
 | Private data in logs | The Worker never logs draft bodies or image keys (Workers observability is on). `publish_error` holds status codes and run URLs only. `backup.yml` prints no content. |
-| Stolen App key | It can push `blog/**` branches, open and close PRs, create tags, and merge or auto-merge **any** PR whose `ci` is green, including a stranger's fork PR. The `ci.yml` guard fails its own PRs that touch code. The `deploy.yml` guard refuses to deploy a bot merge that touches code, and the owner reverts it. No immediate-merge fallback, so a missing `ci` rule stops publishing instead of merging. Rotate the key in the App settings. |
+| Stolen App key | It can push `blog/**` branches, open and close PRs, create tags, and merge **any** PR whose `ci` is green, including a stranger's fork PR. The Worker itself never merges, and auto-merge is off in the repo. The `ci.yml` guard fails its own PRs that touch code. The `deploy.yml` guard refuses to deploy a bot merge that touches code, and the owner reverts it. Rotate the key in the App settings. |
 | Lost work | Rev check (409), conflict snapshot, `localStorage` copy, revisions, Time Travel, nightly export, `base_sha` check before publish. Images of a downloaded `.md` are never deleted automatically. |
 | Test identity leaking into production | See §4.9.9 |
 | A compromised dependency in CI | Cloudflare token only on Wrangler steps, not during install or build. `pnpm` runs install scripts only for `esbuild` and `workerd` (`allowBuilds`). Backups use their own narrow credentials. |
@@ -788,7 +804,7 @@ hosting guide §2.10 checks it.
 
 Tests sign their own tokens. Production auth has no switch to turn it off.
 
-- **Unit (Vitest, Node):** `verifyAccessJwt` with a generated key pair and a local key set: valid, wrong audience, wrong issuer, expired, HS256 confusion, wrong e-mail. `requireOwner`: wrong host, missing or foreign Origin, cross-site `Sec-Fetch-Site`, a missing header with a valid `CF_Authorization` cookie, and `/ADMIN`, `/API/ADMIN/me`, `/%61pi/admin/me`, `/admin.data` returning 404 even with a valid token. A table-driven test walks every admin route and expects 404 without a token. Bridge golden tests: parse → doc → serialize is idempotent, the rendered HTML is the same before and after a round trip, typed syntax stays escaped, `16:9` and `10:30am` survive, bad figures fail. Upload sniffing (SVG, a renamed file, and a type that differs from the row are 415), a raw phone JPEG with GPS is 415, the GIF key has no width suffix, and no `Exif` segment after re-encoding. D1 revision checks with fakes. The GitHub client against fetch fakes: the full publish sequence, slug collision, `base_sha` 409, an already-mergeable PR stopping without a merge, token expiry, and no request body containing `OWNER_EMAIL`. The frontmatter writer round-trips through `gray-matter` and `postFrontmatter`.
+- **Unit (Vitest, Node):** `verifyAccessJwt` with a generated key pair and a local key set: valid, wrong audience, wrong issuer, expired, HS256 confusion, wrong e-mail. `requireOwner`: wrong host, missing or foreign Origin, cross-site `Sec-Fetch-Site`, a missing header with a valid `CF_Authorization` cookie, and `/ADMIN`, `/API/ADMIN/me`, `/%61pi/admin/me`, `/admin.data` returning 404 even with a valid token. A table-driven test walks every admin route and expects 404 without a token. Bridge golden tests: parse → doc → serialize is idempotent, the rendered HTML is the same before and after a round trip, typed syntax stays escaped, `16:9` and `10:30am` survive, bad figures fail. Upload sniffing (SVG, a renamed file, and a type that differs from the row are 415), a raw phone JPEG with GPS is 415, the GIF key has no width suffix, and no `Exif` segment after re-encoding. D1 revision checks with fakes. The GitHub client against fetch fakes: the full publish sequence, slug collision, `base_sha` 409, token expiry, no request to a merge or auto-merge endpoint, and no request body containing `OWNER_EMAIL`. PR title and body for a new post, an update (frontmatter table, sections added, removed and edited) and an unpublish. The frontmatter writer round-trips through `gray-matter` and `postFrontmatter`.
 - **E2E (Playwright against `vite preview`):** `pnpm e2e:keys` runs **before** `pnpm build` (in CI and in the local `pnpm e2e` server command), because the Vite plugin copies `.dev.vars` into the build output at build time and `vite preview` reads that copy. It writes only the public key (`ACCESS_TEST_JWKS`) to the gitignored `apps/web/.dev.vars`, and the private key to the gitignored `e2e/.auth/`. Wrangler drops `.dev.vars` keys that aren't declared once a `secrets` block exists, so `OWNER_EMAIL` is not declared in `secrets.required`; `deploy.yml` checks `wrangler secret list` for it instead, and the gate fails closed without it. Global setup signs a token and fails fast with a clear message if `/api/admin/me` doesn't accept it. Tests send it in `Cf-Access-Jwt-Assertion`. The Worker reads `ACCESS_TEST_JWKS` only when the host is `localhost` or `127.0.0.1`. If it is set on any other host, the gate logs an alert and refuses every admin request. GitHub is a local stub through a `GITHUB_API_BASE` override, which is honoured on localhost only. Local D1 and R2 come from Miniflare.
 - **Guards in CI:** a grep fails if `ACCESS_TEST_JWKS` or `GITHUB_API_BASE` appears in `wrangler.jsonc`. `deploy.yml` never writes `.dev.vars`, and `wrangler deploy` never uploads it. A fixture test seeds a draft and checks its text and image keys never appear in `posts.json`, the RSS feed, the sitemap, the search index or a PR body. A bundle check keeps TipTap out of public chunks.
 - **Production checks** after each auth change are in the hosting guide runbook (§5 and §6).
@@ -833,7 +849,7 @@ plus Cloudflare billing and usage notifications.
 |----------|---------|------------|--------------|
 | Cloudflare instead of a Python VPS | $0 hosting, no servers to run, edge latency, WebSockets built in | Python for the backend. Some lock-in through the Durable Objects API. | You need heavy Python-only libraries (ML or data work) on the backend. You could then add a small Python service beside this one. |
 | Content as code | Versioning, review in PRs, $0, prerendered SEO | Non-technical editors can't help. Posting from a phone needs the editor (§4.9). | Content other than posts needs an editor too. |
-| Browser editor that publishes through a PR (§4.9) | Posting from any device, private drafts, git history and CI checks kept | About 4 minutes from Publish to live. Two stores (D1 and git). A GitHub App key in the Worker. Text is public on the PR before it is live. | The wait becomes painful. Make the App a bypass actor (about 1 minute), or move posts to D1 (ADR-0005 option B). |
+| Browser editor that publishes through a PR (§4.9) | Posting from any device, private drafts, git history, CI checks and a review of every publish kept | A PR to merge by hand for every publish, then about a minute to live. Two stores (D1 and git). A GitHub App key in the Worker. Text is public on the PR before it is live. | Merging by hand becomes a chore (turn on auto-merge for publish PRs), or the wait becomes painful (make the App a bypass actor, about 1 minute, or move posts to D1, ADR-0005 option B). |
 | Cloudflare Access for the admin (§4.9.1) | $0, no login code, MFA through Google | Part of the config lives in the Zero Trust dashboard. A card on file. | Another person needs access, or the admin grows. Move it to `admin.ry-mart.com`. |
 | Client-side search | Results on every keystroke, no backend | Index download size. No search analytics. | The gzipped index goes over 300 KB or there are more than 5k documents. Then move to D1 FTS5 or Pagefind. |
 | One DO per lobby | Strong consistency, simple code | Tied to Cloudflare's runtime | Moving off Cloudflare. `game-core` is portable, so only about 450 lines of transport code (`worker/api.ts` and `worker/game-lobby.ts`) would need rewriting. |
@@ -853,6 +869,7 @@ plus Cloudflare billing and usage notifications.
 - Slug redirects after a rename (for example a `content/redirects.json` written in the same commit)
 - Truly private draft images (a WAF-blocked `drafts/` prefix, copied on publish)
 - Cover images: render `cover` on post cards and as the OG image, then add a cover picker to the editor
+- Auto-merge for publish PRs, if merging each one by hand becomes a chore
 - A faster publish path that skips CI (the App as a ruleset bypass actor)
 
 ---
@@ -865,14 +882,14 @@ plus Cloudflare billing and usage notifications.
 4. ~~**Should game lobbies allow spectators?**~~ **Decided:** yes, up to 8 per lobby. The next one is told the lobby is full.
 5. **Analytics:** is Cloudflare Web Analytics (cookieless, so no cookie banner) acceptable?
 
-Authoring (§4.9). Answer these at Step 10.0:
+Authoring (§4.9). Answered by the owner on 2026-10-12:
 
-6. **Sign-in method:** the Cloudflare login you already use (proposed, no Google Cloud setup), or direct Google login through Access?
-7. **Session length:** 24 hours (proposed) or up to 7 days?
-8. **`workers_dev: false` and `preview_urls: false`:** proposed. They remove the `<subdomain>.workers.dev` fallback URL and Preview URLs. Keep them instead? The host check still blocks admin there, and a Preview would need its own non-production `DB` and `PHOTOS` bindings.
-9. **Publish speed and exposure:** is about 4 minutes from Publish to live acceptable, with the text public on a GitHub PR from the moment you click? Or do you want the fast path from the start (the App pushes straight to `main`, about 1 minute, no CI first)?
-10. **Repo settings:** OK to change the live `main` ruleset to match hosting guide §2.4 (0 approvals, required `ci` check, Restrict updates off) and turn on auto-merge? Your own PRs would then merge without the admin bypass once `ci` passes.
-11. **Updated date:** show "Updated <date>" on posts edited after publishing (proposed: yes)?
-12. **Slugs:** lock a post's URL after the first publish (proposed), or add redirects later so slugs can change?
-13. **Draft images:** are unguessable URLs private enough, or do you want the WAF-blocked `drafts/` prefix (more code)?
-14. **Card on file:** Zero Trust asks for a payment method even on the Free plan (R2 already has one). Zero Trust Free, Workers Free and D1 stop at their limits, but R2 bills anything over its free 10 GB and 1M/10M operations a month to that card. Acceptable, with a billing alert (hosting guide §2.8)?
+6. ~~**Sign-in method:** the Cloudflare login you already use, or direct Google login through Access?~~ **Decided:** the existing Cloudflare login (the Access "Cloudflare" identity provider, restricted to account members). No Google Cloud setup.
+7. ~~**Session length:** 24 hours or up to 7 days?~~ **Decided:** 24 hours.
+8. ~~**`workers_dev: false` and `preview_urls: false`?**~~ **Decided:** yes. The `<subdomain>.workers.dev` fallback URL and Preview URLs go away.
+9. ~~**Publish speed and exposure:** about 4 minutes, with the text public on a GitHub PR from the click, or the fast path?~~ **Decided:** the PR flow. Posts aren't sensitive, so the text being public on the PR first is fine.
+10. ~~**Repo settings:** change the `main` ruleset to match hosting guide §2.4 and turn on auto-merge?~~ **Decided:** yes to the §2.4 ruleset, no to auto-merge. Publish opens a PR with an overview and a summary of the changes (§4.9.7), and the owner reviews and merges it by hand. The owner sets required approvals to 0 in the `main` ruleset (GitHub doesn't let you approve your own PRs). The GitHub default branch is now `main`.
+11. ~~**Updated date:** show "Updated <date>" on posts edited after publishing?~~ **Decided:** yes. A republish sets `updated` automatically, `date` never changes, and the post shows both.
+12. ~~**Slugs:** lock a post's URL after the first publish, or add redirects later?~~ **Decided:** locked after the first publish, so a copied link keeps working.
+13. ~~**Draft images:** are unguessable URLs private enough?~~ **Decided:** yes. No `drafts/` prefix.
+14. ~~**Card on file:** acceptable, with a billing alert?~~ **Decided:** yes. The owner has put a card on file and set the R2 billing alert (hosting guide §2.8).

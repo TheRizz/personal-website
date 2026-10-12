@@ -244,7 +244,8 @@ from the nav yet.
 > a pasted invite link. When the spectator cap is reached the page says "This game is full" and
 > offers Try again. When another tab takes the seat (close 4000), the old tab offers "Watch here".
 > The two-player Playwright tests use separate browser contexts against `vite preview`, and CI
-> runs them after the build.
+> runs them after the build. The owner played tic-tac-toe on ry-mart.com and confirmed it works
+> correctly on 2026-10-12.
 
 ### Step 8.1: Lobby screens
 - [x] `/games`: list of games. `/games/tictactoe`: "Create game" and "Join with code" (input upper-cases and filters to the allowed alphabet).
@@ -314,13 +315,16 @@ committing the downloaded `.md` through a normal PR. Steps 10.7–10.11 add
 one-click publishing.
 
 ### Step 10.0: Owner setup, part 1 (no code)
-- [ ] Answer §8 Q6–14. Accept or change ADR-0004 and ADR-0005, and set their status to *Accepted*.
-- [ ] Hosting guide §2.7: turn on Zero Trust Free and create the "Site admin" Access app (paths `admin` and `api/admin`, owner-only policy, SameSite Lax, HttpOnly, Binding cookie, empty CORS). Note the team domain and AUD tag; Step 10.1 commits them.
-- [ ] Hosting guide §2.8: create the D1 database `blog` (note its id; Step 10.4 commits it) and the private bucket `blog-backups`. Finish §2.2 (`photos` and `photos.ry-mart.com`) if it isn't done. Add the `nosniff` Transform Rule and the R2 billing alert.
+- [x] Answer §8 Q6–14 and set ADR-0004 and ADR-0005 to *Accepted* (2026-10-12). ADR-0005 is amended: the owner merges every publish PR by hand.
+- [x] A card on file and the R2 billing alert (§2.8 step 5).
+- [x] The GitHub default branch is `main` (§2.4 step 1).
+- [ ] Hosting guide §2.7: turn on Zero Trust Free and create the "Site admin" Access app (paths `admin` and `api/admin`, the Cloudflare login, owner-only policy, 24-hour sessions, SameSite Lax, HttpOnly, Binding cookie, empty CORS).
+- [ ] Hosting guide §2.8: create the D1 database `blog` and the private bucket `blog-backups`. Finish §2.2 (`photos` and `photos.ry-mart.com`) if it isn't done. Add the `nosniff` Transform Rule.
 - [ ] Hosting guide §2.9: `wrangler secret put OWNER_EMAIL`. Add Account · D1 · Edit to the CI token (§2.3). Create the backup-only D1 token and the R2 key scoped to `blog-backups`.
 - [ ] Confirm the `main` environment only deploys from `main` (§2.4 check).
+- [ ] Send back the team domain, the AUD tag and the D1 `database_id` (none is secret), so a follow-up commit fills them in (Access vars in Step 10.1, the `DB` binding in Step 10.4).
 
-**Done when:** every ✅ check in hosting guide §2.7–2.9 passes, and `curl -sI https://ry-mart.com/admin` returns `302` to `<team>.cloudflareaccess.com`.
+**Done when:** every ✅ check in hosting guide §2.7–2.9 passes, `curl -sI https://ry-mart.com/admin` returns `302` to `<team>.cloudflareaccess.com`, and the team domain, AUD tag and D1 id have been sent back.
 
 ### Step 10.1: Owner gate in the Worker
 - [ ] Site-wide CSP and security headers from §4.8 (`img-src` includes `photos.ry-mart.com`), so they are live before any owner session can exist. Check the game WebSocket still works.
@@ -375,35 +379,37 @@ one-click publishing.
 **Done when:** unit tests accept JPEG, PNG, WebP and GIF and refuse with 415 SVG, HTML, a renamed file, a type that differs from the row, and a raw phone JPEG that carries GPS. Re-encoded output has no `Exif` segment, and a GIF lands at a key with no width suffix. E2E inserts an image, moves it above a paragraph, the Markdown shows the `::figure` line in its new place, and the preview renders `figure` and `figcaption`. Discarding a draft after **Download .md** leaves its images in R2. The cron test deletes only stale `pending` rows and unpublished orphans. A JPEG uploaded from a phone in production shows up at `photos.ry-mart.com` with the immutable header and no GPS data.
 
 ### Step 10.7: Owner setup, part 2: repo settings and GitHub App (no code)
-- [ ] Hosting guide §2.10: fix the `main` ruleset to match §2.4 (0 approvals, required `ci`, Restrict updates off). Turn on Allow auto-merge and Automatically delete head branches. From now on your own PRs merge without the admin bypass once `ci` passes.
+- [ ] Hosting guide §2.10: fix the `main` ruleset to match §2.4 (0 approvals, which the owner sets, required `ci`, Restrict updates off). Turn on Automatically delete head branches and leave Allow auto-merge off. From now on your own PRs merge by hand without the admin bypass once `ci` passes.
 - [ ] Add the "bot scope" ruleset: restrict creations and updates on every branch except `main` and `blog/**`, with the Admin role, Dependabot and the Claude GitHub App as bypass actors.
 - [ ] Create the GitHub App (Contents RW, Pull requests RW, Actions R, Checks R, no Workflows, no webhook), install it on this repo only, pipe the key through the PKCS#8 conversion into the Worker secret (the `.pem` stays outside the repo) and set the three `GITHUB_APP_*` Worker secrets. Never add the App as a bypass actor.
 
-**Done when:** every ✅ check in §2.10 up to check 10 passes. A throwaway PR with auto-merge on merges by itself after `ci` passes, with no approval and no bypass. A local `test/x` push and a Claude Code `claude/test` push both still work.
+**Done when:** every ✅ check in §2.10 up to check 10 passes. A throwaway PR can't be merged while `ci` runs and merges by hand once it passes, with no approval and no bypass. A local `test/x` push and a Claude Code `claude/test` push both still work.
 
 ### Step 10.8: CI guard for bot PRs (must merge before 10.9)
 - [ ] First step of the `ci` job, on `pull_request` only, inline in the YAML and before checkout and `pnpm install`: read the PR's files and commits from the API and fail when the PR author is the App's bot, or any commit has the bot as committer, and a changed file is outside `content/blog/`. No repo script runs.
 - [ ] First step of `deploy.yml`, before checkout: fail when `github.actor`, or the author or merger of the PR behind the commit, is the bot and the compare API's file list for `<before>...<sha>` touches anything outside `content/blog/`.
 - [ ] `scripts/app-token.ts` (`pnpm app-token --key <path>`): signs the App JWT with `jose` from the downloaded key and prints an installation token, for the §2.10 checks.
 
-**Done when:** with an App token from `pnpm app-token`: it can create `blog/test` and is refused on `test`. A test PR that touches `README.md` fails `ci` and doesn't auto-merge, and one that only adds `content/blog/x.md` passes. Merging a green PR that edits `.github/workflows/` is refused. Merging a green owner PR that touches `README.md` with the App token makes the deploy fail at the guard (then revert it). §2.10 check 11 passes and the `.pem` is deleted.
+**Done when:** with an App token from `pnpm app-token`: it can create `blog/test` and is refused on `test`. A test PR that touches `README.md` fails `ci` and can't be merged, and one that only adds `content/blog/x.md` passes. Merging a green PR that edits `.github/workflows/` is refused. Merging a green owner PR that touches `README.md` with the App token makes the deploy fail at the guard (then revert it). §2.10 check 11 passes and the `.pem` is deleted.
 
 ### Step 10.9: Publish from the editor
 - [ ] `worker/github.ts`: App JWT (`jose`, RS256, `iat` now − 60 s, `exp` + 9 min), installation token cached per isolate, `User-Agent`, typed calls for refs, trees, commits, pulls, GraphQL. `GITHUB_API_BASE` override on localhost only, for the e2e stub.
 - [ ] Frontmatter writer (`JSON.stringify` per value), slug generator, path allowlist, uniqueness check against `main` and open `blog/*` PRs, and the check that every figure key is `ready`.
-- [ ] `POST …/publish`: one commit (author from the plain var `GIT_AUTHOR`, the owner's no-reply address), branch, PR and auto-merge, with no immediate-merge fallback (§4.9.7). Publishing again while the PR is open adds a commit to the same branch.
+- [ ] `POST …/publish`: one commit (author from the plain var `GIT_AUTHOR`, the owner's no-reply address), branch and PR. The Worker never merges and never turns on auto-merge; the owner merges (§4.9.7). Publishing again while the PR is open adds a commit to the same branch, refreshes the body and comments with what changed.
+- [ ] PR title and body (§4.9.7): `Publish:`, `Update:` or `Unpublish: <title>`; an overview (URL, summary, tags, reading time, created and updated dates); the figures inline from `photos.ry-mart.com` with their alt text; "What changed" (frontmatter old → new and a section-level body summary for an update); a short review checklist.
+- [ ] Dates: republishing a published post sets `updated` to the publish day and never changes `date`. `blog.$slug` shows "Published <date> · Updated <date>", the second part only when they differ.
 - [ ] Confirm dialog with the exposure and timing warning.
 - [ ] `GET /api/admin/posts` (one GraphQL tree query, cached by tree SHA) and Edit-from-`main` import with the `base_sha` check.
 - [ ] On `blog.$slug`, a client-only probe behind `owner_hint` that shows "Edit" linking to `/admin/posts/<slug>` with a full page load. It ships here because that route needs the import above.
 
-**Done when:** Vitest with fetch fakes covers the happy path, slug collision, `base_sha` 409, an already-mergeable PR stopping without a merge, token expiry, and no request body containing `OWNER_EMAIL`, and the frontmatter round-trips through `gray-matter` and `postFrontmatter`. E2E: a visitor without the cookie makes zero `/api/admin` requests (Playwright request log), the prerendered post has no admin markup, Edit appears with the cookie and test token and opens the imported draft, and without the token there is no Edit link and no uncaught exception or app-logged error (the browser's own failed-request message for `/api/admin/me` is filtered). A real test post published from production is live at `/blog/<slug>` within about 6 minutes.
+**Done when:** Vitest with fetch fakes covers the happy path, slug collision, `base_sha` 409, token expiry, no request to a merge or auto-merge endpoint, no request body containing `OWNER_EMAIL`, and the PR title and body for a new post, an update and an unpublish. The frontmatter round-trips through `gray-matter` and `postFrontmatter`, and a republish changes `updated` but not `date`. E2E: a visitor without the cookie makes zero `/api/admin` requests (Playwright request log), the prerendered post has no admin markup, Edit appears with the cookie and test token and opens the imported draft, and without the token there is no Edit link and no uncaught exception or app-logged error (the browser's own failed-request message for `/api/admin/me` is filtered). A real test post published from production opens a PR with the overview, the owner merges it, and the post is live at `/blog/<slug>` within about 2 minutes of the merge.
 
 ### Step 10.10: Publish status, cancel and unpublish
-- [ ] `GET …/status` (one GraphQL PR query, the deploy run for the merge SHA, `/api/health`) and the timeline in the editor: PR opened → CI running → merging → deploying → Live, with links.
+- [ ] `GET …/status` (one GraphQL PR query, the deploy run for the merge SHA, `/api/health`) and the timeline in the editor: PR opened → CI running → waiting for your review → merged → deploying → Live, with links. A PR closed without a merge puts the draft back to Draft.
 - [ ] CI failed: "Fix and republish" or "Cancel" (closes the PR, deletes the branch). Deploy failed: link to the run.
 - [ ] Unpublish (a `sha: null` tree entry through the same PR flow). Images get `published = 1` when Live.
 
-**Done when:** e2e against the GitHub stub walks every stage, including a CI failure. In production, a deliberately broken post shows "CI failed" with a working link, Cancel closes the PR and deletes the branch, and the test post from Step 10.9 is unpublished the same way and returns 404.
+**Done when:** e2e against the GitHub stub walks every stage (the stub plays the owner's merge), including a CI failure and a PR closed on GitHub. In production, a deliberately broken post shows "CI failed" with a working link, Cancel closes the PR and deletes the branch, and the test post from Step 10.9 is unpublished through an `Unpublish:` PR the owner merges, and returns 404.
 
 ### Step 10.11: Hardening
 - [ ] Draft privacy fixture test: a seeded draft's text and image keys never appear in `posts.json`, RSS, the sitemap, the search index or a PR body.
@@ -423,7 +429,7 @@ one-click publishing.
 | M4: Games | 7–8 | 1v1 tic-tac-toe with lobby codes, playable across devices |
 | M5: Launch | 9 | Quality gates, monitoring, the complete go-live checklist |
 | M6: Private drafts | 10.0–10.6 | Owner-only editor with header sizes, bold, italics and image sections. Posts are published by committing the downloaded `.md`. |
-| M7: Publish from the browser | 10.7–10.11 | One click from draft to live post in about 4 minutes, with progress, cancel and unpublish |
+| M7: Publish from the browser | 10.7–10.11 | One click from draft to a PR with an overview of the changes. The owner merges it and the post is live about a minute later, with progress, cancel and unpublish. |
 
 ## Definition of done (applies to every step)
 

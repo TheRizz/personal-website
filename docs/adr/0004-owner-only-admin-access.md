@@ -1,6 +1,6 @@
 # ADR-0004: Owner-only admin via Cloudflare Access and a Worker JWT check
 
-**Status:** Proposed · **Date:** 2026-10-12 · **Deciders:** Ryan Martinez
+**Status:** Accepted · **Date:** 2026-10-12 · **Deciders:** Ryan Martinez
 
 ## Context
 
@@ -43,11 +43,16 @@ layer. The Worker gate (`requireOwner`) runs before any routing and does this:
 
 1. Canonicalise the path (percent-decode, lowercase, collapse `//`, strip a trailing `.data`) and treat `/admin`, `/admin/*`, `/api/admin` and `/api/admin/*` as admin. React Router matches `/ADMIN`, `/%61dmin` and `/admin.data` to admin routes, and Access's handling of those variants isn't documented. So any admin request whose raw path isn't already canonical is a 404, even with a valid token: only the spellings Access covers are served, and Access's binding cookie, logout and revocation apply to every one of them.
 2. Return 404 unless the host is exactly `ry-mart.com`. Set `workers_dev: false` and `preview_urls: false` as well.
-3. Verify the `Cf-Access-Jwt-Assertion` header (never the `CF_Authorization` cookie, which the client controls) and the owner email (a Worker secret), with a maximum token age. A missing header means Access wasn't in front. Every failure is a 404, so nothing confirms the route exists. A JWKS fetch failure fails closed.
+3. Verify the `Cf-Access-Jwt-Assertion` header (never the `CF_Authorization` cookie, which the client controls) and the owner email (a Worker secret), with a maximum token age equal to the 24-hour Access session. A missing header means Access wasn't in front. Every failure is a 404, so nothing confirms the route exists. A JWKS fetch failure fails closed.
 4. On writes, require `Origin: https://ry-mart.com`, `Sec-Fetch-Site: same-origin` when present, a JSON (or image) content type and an `X-Admin: 1` header.
 
 The admin router is mounted behind this one guard, so no route can forget it.
 Design details are in [design doc §4.9.1](../01-system-design.md#491-access-control).
+
+The owner accepted this on 2026-10-12: sign-in through the existing Cloudflare
+login (the Access "Cloudflare" identity provider, restricted to account
+members), 24-hour sessions, and `workers_dev` and `preview_urls` turned off
+(design doc §8 Q6–8).
 
 ## Consequences
 
@@ -56,7 +61,7 @@ Design details are in [design doc §4.9.1](../01-system-design.md#491-access-con
 - New config: Access vars in `wrangler.jsonc` (team domain and AUD tag are not secret), the owner email as a secret, `run_worker_first` gains `/admin` and `/admin/*`, and `workers_dev` and `preview_urls` become `false`. The workers.dev fallback URL and Preview URLs go away.
 - Tests never weaken production auth. E2E signs its own tokens against a test key that the Worker accepts only on `localhost`, and only from a gitignored `.dev.vars` written before the build. If that key is ever present on another host, the gate refuses every admin request.
 - The Access cookie must be set to SameSite Lax by hand. The default is None, which would make cross-site POSTs authenticated. The Worker's Origin check covers this either way.
-- A card is on file with Zero Trust, as it is for R2. Zero Trust Free isn't charged. R2 bills usage above its free tier, so a billing alert is set (hosting guide §2.8).
+- A card is on file for the account, and Zero Trust Free isn't charged. R2 bills usage above its free tier, so the owner has set an R2 billing alert (hosting guide §2.8).
 
 ## Revisit when
 

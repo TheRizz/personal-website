@@ -1,6 +1,6 @@
 # ADR-0005: In-browser authoring: private drafts in D1, published as Markdown through a pull request
 
-**Status:** Proposed · **Date:** 2026-10-12 · **Deciders:** Ryan Martinez
+**Status:** Accepted · **Date:** 2026-10-12 (amended the same day: the owner merges each publish PR by hand) · **Deciders:** Ryan Martinez
 
 ## Context
 
@@ -19,9 +19,9 @@ Constraints:
 
 ### A. Git stays the source of truth. Drafts in D1, published by a GitHub App pull request
 - Drafts, revisions and an image ledger live in a D1 database. Images go to the R2 `photos` bucket.
-- **Publish** makes one commit with the Git Data API on a `blog/<slug>-<time>` branch, opens a PR and turns on squash auto-merge. CI validates the post, and the existing `deploy.yml` ships it. About 3.5–4 minutes from click to live (CI about 2m15s, deploy about 1 min, both measured).
+- **Publish** makes one commit with the Git Data API on a `blog/<slug>-<time>` branch and opens a PR that describes the post and its changes. CI validates the post, the owner reviews and merges the PR, and the existing `deploy.yml` ships it. About 3.5–4 minutes from click to live when the PR is merged as soon as CI passes (CI about 2m15s, deploy about 1 min, both measured).
 - **Keeps** ADR-0002: git history, PR checks, prerendered SEO, rollback by revert.
-- **Cons:** two stores (D1 and git) with a hand-off that can fail midway. A GitHub credential lives in the Worker. The post text is public on the PR about 4 minutes before it is live. The repo ruleset has to change before auto-merge can work.
+- **Cons:** two stores (D1 and git) with a hand-off that can fail midway. A GitHub credential lives in the Worker. The post text is public on the PR from the click until about a minute after the merge. Every publish waits for the owner to merge it.
 
 ### B. D1 is the source of truth, and every publish triggers a snapshot deploy
 - Posts live in D1. Publishing dispatches `deploy.yml`, which snapshots D1 into the build. A new post's URL works in seconds through a client-rendered fallback page. Everything else is static again in about 1–1.5 minutes. Slug renames get real redirects. Only an Actions-only token lives in the Worker.
@@ -52,21 +52,31 @@ its main costs (about 4 minutes to publish, two stores) are stated and tested.
 - **Image sections** are a leaf directive on their own line, `::figure[caption]{src alt size w h}`, rendered at build time into `<figure>` with a responsive `<img>` (design doc §4.9.4). Only the leaf form of the directive syntax is turned on, because the full form turns prose like `16:9` and `10:30am` into empty `<div>`s.
 - **One renderer.** A new `packages/content-markdown` is shared by the build, the admin preview (which runs in the browser) and the editor bridge.
 - **Images** are resized and stripped of EXIF in the browser, checked by magic bytes in the Worker, and stored in R2 under random keys.
+- **The owner merges.** The Worker opens the PR and never merges it or turns on auto-merge. The PR is the review step, so it carries everything needed to review it on GitHub, from a phone too:
+  - **Title:** `Publish: <title>`, `Update: <title>` or `Unpublish: <title>`.
+  - **Overview:** the post URL, summary, tags, reading time, and the created and updated dates.
+  - **Images:** each figure shown inline from `photos.ry-mart.com`, with its alt text and caption.
+  - **What changed:** for an edit, the frontmatter fields that changed (old → new) and a section-level summary of the body (each section added, removed or edited, by heading, with the word-count change). A new post lists its sections; an unpublish says the file is deleted.
+  - **Review checklist:** reads well, alt text and captions right, summary and tags right, nothing private, `ci` green, then **Squash and merge**.
+
+  Republishing while the PR is open updates the body and adds a comment saying what changed since the last commit.
+- **Dates.** `date` is set at the first publish and never changes. Republishing a published post sets `updated` to the publish day, and the post page shows "Published <date> · Updated <date>" when they differ.
 - **Ship in two halves.** First the private editor with a "Download .md" button, so posts can be published through the normal PR flow. The GitHub App publish flow comes after.
 
 ## Consequences
 
 - This amends ADR-0002's "Upgrade path": the in-browser editor replaces the git-backed CMS idea, and the storage model for published posts doesn't change. Hand-written `content/blog/*.md` files keep working.
 - New resources: a D1 database `blog`, a private R2 bucket `blog-backups` for nightly draft exports, a GitHub App with Contents and Pull requests write on this repo only, and one daily cron. All are $0.
-- The `main` ruleset has to match hosting guide §2.4 (0 approvals, a required `ci` check, Restrict updates off) and auto-merge has to be on. The owner's own PRs then merge without the admin bypass once `ci` passes.
-- The App is never a ruleset bypass actor. A second ruleset limits it to `blog/**` branches, and `ci.yml` fails any PR whose bot commits touch files outside `content/blog/`. It can still merge any PR whose `ci` is green, so `deploy.yml` refuses to deploy a bot merge that touches code (design doc §4.9.7).
-- Publishing makes the text public on a GitHub PR about 4 minutes before it is live, and it stays in history even if CI fails. The publish dialog says so.
-- Slugs are locked after the first publish, because there is no redirect mechanism yet.
+- The `main` ruleset has to match hosting guide §2.4 (a required `ci` check, Restrict updates off, and 0 approvals, which the owner sets, because GitHub doesn't let them approve their own PRs). Allow auto-merge stays off. The owner's PRs, publish PRs included, then merge by hand without the admin bypass once `ci` passes.
+- The App is never a ruleset bypass actor. A second ruleset limits it to `blog/**` branches, and `ci.yml` fails any PR whose bot commits touch files outside `content/blog/`. The Worker never merges, but the App's permissions still allow merging any PR whose `ci` is green, so `deploy.yml` refuses to deploy a bot merge that touches code (design doc §4.9.7).
+- Publishing makes the text public on a GitHub PR before it is live (about 4 minutes when merged promptly; the owner accepted this, posts aren't sensitive), and it stays in history even if CI fails or the PR is closed. The publish dialog says so.
+- Slugs are locked after the first publish, so a copied link keeps working; there is no redirect mechanism yet.
 - The first save of an old hand-written post through the editor normalises its Markdown (`-` bullets, `*` emphasis), which gives a one-time noisy diff.
 - `::figure` lines show as literal text in GitHub's file view.
 
 ## Revisit when
 
+- Merging every publish PR by hand becomes a chore. Turn on auto-merge for publish PRs (squash, after `ci`), which needs **Allow auto-merge** in the repo settings.
 - Waiting about 4 minutes to publish becomes painful. Options: make the App a bypass actor and push straight to `main` (about 1 minute, no CI first), or move to Option B.
 - The repo becomes private. A stock git CMS (Sveltia) becomes viable, since draft branches would no longer be public.
 - The bridge needs nodes it doesn't support (tables, footnotes). Add a mapper and golden tests, or switch to Milkdown.
