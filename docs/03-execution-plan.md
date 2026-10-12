@@ -58,6 +58,7 @@ from the nav yet.
 - [x] Runs on `pull_request`: install with a pnpm cache, then lint, typecheck, test and build.
 - [x] Pin actions to SHAs, use minimal `permissions`, and use `concurrency` to cancel superseded runs.
 - [ ] Preview job: `wrangler versions upload --preview-alias pr-<n>`, then post the preview URL as a PR comment that gets updated on each push.
+  - Version URLs aren't generated for a Worker that has a Durable Object, so this job can't work as written. The alternative is `wrangler preview` (Previews), whose bindings must never point at the production `blog` D1 database (Phase 10).
 - [x] Add Dependabot config for npm and github-actions.
 
 **Done when:** a test PR shows a green `ci` check and a working preview URL.
@@ -243,7 +244,8 @@ from the nav yet.
 > a pasted invite link. When the spectator cap is reached the page says "This game is full" and
 > offers Try again. When another tab takes the seat (close 4000), the old tab offers "Watch here".
 > The two-player Playwright tests use separate browser contexts against `vite preview`, and CI
-> runs them after the build.
+> runs them after the build. The owner played tic-tac-toe on ry-mart.com and confirmed it works
+> correctly on 2026-10-12.
 
 ### Step 8.1: Lobby screens
 - [x] `/games`: list of games. `/games/tictactoe`: "Create game" and "Join with code" (input upper-cases and filters to the allowed alphabet).
@@ -289,11 +291,147 @@ from the nav yet.
 **Done when:** a fresh clone can run the site by following the README only.
 
 ### Step 9.4: Launch
-- [ ] Work through the whole go-live checklist (hosting guide §5).
-- [ ] Turn on HSTS. Submit the sitemap to Google Search Console and Bing Webmaster Tools (both free).
+- [ ] Work through the go-live checklist (hosting guide §5), except the Authoring block, which Step 10.11 covers.
+- [ ] HSTS: the site already sends `Strict-Transport-Security: max-age=31536000` (Step 10.1). Decide on `includeSubDomains` and `preload`, and submit to the preload list only once every subdomain serves HTTPS. Submit the sitemap to Google Search Console and Bing Webmaster Tools (both free).
 - [ ] Replace the seed content with real posts, snippets, photos and resume.
 
-**Done when:** every checklist box is ticked.
+**Done when:** every checklist box outside the Authoring block is ticked.
+
+---
+
+## Phase 10: Owner-only authoring
+
+The owner drafts posts in a browser editor that only they can reach, with header
+sizes, bold, italics and image sections, and publishes them as Markdown through
+a pull request. Design: §4.9, [ADR-0004](./adr/0004-owner-only-admin-access.md)
+and [ADR-0005](./adr/0005-in-browser-authoring.md). Setup clicks: hosting guide
+§2.7–2.10.
+
+**Rule for this phase:** the owner gate and the site-wide CSP (Step 10.1) ship
+before any admin page or endpoint exists. Every later step adds its routes to the route-auth table
+test from Step 10.1, so nothing admin is ever reachable without a valid owner
+token. Steps 10.0–10.6 give a working private editor; posts are published by
+committing the downloaded `.md` through a normal PR. Steps 10.7–10.11 add
+one-click publishing.
+
+> **Built 2026-10-12 (Steps 10.1–10.3, code only).** The production Done-whens stay open until
+> Step 10.0 is finished: the Access vars in `wrangler.jsonc` are empty until the owner sends the
+> team domain and AUD tag, so admin fails closed in production. Deviations from the plan:
+> prerendered pages get their CSP from a `_headers` file generated in `buildEnd`, one rule per
+> page listing that page's inline scripts by sha256 hash; Worker-rendered pages get a per-request
+> nonce. The policy also allows Cloudflare Web Analytics (`static.cloudflareinsights.com`,
+> `cloudflareinsights.com`), and `zod` runs `jitless` because its JIT trips the CSP.
+> `_headers` is capped at 100 rules, one per prerendered page, so the build warns above 80 and
+> fails at about 92 posts; the fallback is in design doc §4.8. HSTS (`max-age=31536000`) is
+> sent from this step, so Step 9.4 only decides on `includeSubDomains` and `preload`. Admin
+> paths get their own stricter CSP instead of the site-wide one (§4.9.8). Gate refusals are a
+> bare 404 (plain text for pages), not the site's HTML 404 (§4.9.1). E2E needs `pnpm e2e:keys`
+> before `pnpm build`. The post page shows "<date> • Updated <date>", which ships here with
+> Step 10.2 rather than with Step 10.9. Wide and full figures are sized in `cqw` of the root,
+> not `vw`, so a classic scrollbar doesn't push them off centre.
+
+### Step 10.0: Owner setup, part 1 (no code)
+- [x] Answer §8 Q6–14 and set ADR-0004 and ADR-0005 to *Accepted* (2026-10-12). ADR-0005 is amended: the owner merges every publish PR by hand.
+- [x] A card on file and the R2 billing alert (§2.8 step 5).
+- [x] The GitHub default branch is `main` (§2.4 step 1).
+- [x] Hosting guide §2.7: turn on Zero Trust Free and create the "Site admin" Access app (paths `admin` and `api/admin`, the Cloudflare login, owner-only policy, 24-hour sessions, SameSite Lax, HttpOnly, Binding cookie, empty CORS).
+- [ ] Hosting guide §2.8: create the D1 database `blog` and the private bucket `blog-backups`. Finish §2.2 (`photos` and `photos.ry-mart.com`) if it isn't done. Add the `nosniff` Transform Rule.
+- [ ] Hosting guide §2.9: `wrangler secret put OWNER_EMAIL`. Add Account · D1 · Edit to the CI token (§2.3). Create the backup-only D1 token and the R2 key scoped to `blog-backups`.
+- [ ] Confirm the `main` environment only deploys from `main` (§2.4 check).
+- [ ] Send back the team domain, the AUD tag and the D1 `database_id` (none is secret), so a follow-up commit fills them in (Access vars in Step 10.1, the `DB` binding in Step 10.4). The team domain (`tight-boat-6333`) and AUD tag arrived on 2026-10-12 and are in `wrangler.jsonc`; the D1 id is still to come.
+
+**Done when:** every ✅ check in hosting guide §2.7–2.9 passes, `curl -sI https://ry-mart.com/admin` returns `302` to `<team>.cloudflareaccess.com`, and the team domain, AUD tag and D1 id have been sent back.
+
+### Step 10.1: Owner gate in the Worker
+- [x] Site-wide CSP and security headers from §4.8 (`img-src` includes `photos.ry-mart.com`), so they are live before any owner session can exist. Check the game WebSocket still works.
+- [x] `pnpm add jose` (exact version) in `apps/web`. `worker/admin-auth.ts`: `verifyAccessJwt` as a pure function (with `maxTokenAge`), and `requireOwner` with admin detection, a 404 for any non-canonical spelling, host check, header-only token (no cookie fallback), CSRF rules, no-store and noindex headers (§4.9.1).
+- [x] Call it first in `worker/index.ts`, before `/api/*` dispatch and the React Router handler. Mount an admin router behind it.
+- [x] `GET /api/admin/me` (sets `owner_hint`). Requests to the API are refused with 404 everywhere else under `/api/admin`.
+- [x] `wrangler.jsonc`: Access vars, `run_worker_first` adds `/admin` and `/admin/*`, `workers_dev: false`, `preview_urls: false`. No `secrets.required` block (it would hide the e2e key); `deploy.yml` checks `wrangler secret list` for `OWNER_EMAIL` instead. `robots.txt` adds `Disallow: /admin`.
+- [x] `deploy.yml`: `CLOUDFLARE_API_TOKEN` only on the Wrangler steps, not the job.
+- [x] Test identity: `pnpm e2e:keys` runs before `pnpm build` in CI and in the local `pnpm e2e` server command. It writes `ACCESS_TEST_JWKS` (public key only) to `.dev.vars` and the private key to the gitignored `e2e/.auth/`. Global setup signs tokens and fails fast if the build doesn't accept them. The Worker honours the key on localhost only and fails closed if it sees it on any other host. CI grep guard on `wrangler.jsonc`.
+- [x] Never log tokens, draft bodies or image keys.
+
+**Done when:** Vitest covers valid, wrong audience, wrong issuer, too old, expired, HS256, wrong e-mail, wrong host, missing Origin, cross-site `Sec-Fetch-Site`, a valid `CF_Authorization` cookie with no header (404), and `/ADMIN`, `/%61dmin` and `/admin.data`. A table-driven test expects 404 without a token on every admin route, and a check fails if any admin route or the root route exports a server `loader` or `action`. E2E gets 404 anonymously and `200 {email}` with the test token on `/api/admin/me`, and 404 **with** the test token on `/API/ADMIN/me`, `/%61pi/admin/me` and `/ADMIN/`. After deploy, the runbook checks pass: anonymous gets the Access redirect, the logged-in browser sees its e-mail, a cross-site POST is refused, securityheaders.com shows the CSP and the games still work.
+
+### Step 10.2: Shared Markdown package and figures in the build ⇄
+- [x] `packages/content-markdown`: `remarkLeafDirective` (leaf only), `remarkFigure` (validation, variant widths from `w`, `srcset`, `sizes`, size classes), `sanitizeSchema`, `renderMarkdown(md, {highlighter})`, `markdownToDoc` / `docToMarkdown`, `SHIKI_LANGS` (§4.9.4).
+- [x] Switch `scripts/build-content.ts` to it. Figure CSS for column, wide and full.
+- [x] `build-content --check-images` in CI: HEAD each figure URL, only when files under `content/blog/` change, and only for posts that have figures, so unrelated PRs never depend on `photos.ry-mart.com`.
+
+**Done when:** every existing post renders byte-identical HTML to before. Golden tests pass: round trip is idempotent, rendered HTML is the same after a round trip, typed syntax stays escaped, `16:9` and `10:30am` are untouched, a bad `src`, missing `alt`, missing `w`/`h` or unknown `size` fails the build with file and line. A test post with a wide figure renders `figure`, `img[srcset]` and `figcaption`.
+
+### Step 10.3: Admin shell
+- [x] `/admin` layout route: client data only, CSP with a per-request nonce, `frame-ancestors 'none'`, a "Sign out" link that also clears `owner_hint`, and an empty draft list. Never in the prerender list.
+- [x] The `fetch` wrapper for `/api/admin/*`: adds `X-Requested-With: XMLHttpRequest` (Access answers 401, not a redirect) and `X-Admin: 1` (the gate needs it on writes), and shows "Session expired" on 401.
+
+**Done when:** e2e signs in with the test token and sees the empty draft list. A test write through the wrapper passes the gate, and the same write without the wrapper gets 404. The prerendered post HTML is unchanged. axe shows no new violations.
+
+### Step 10.4: Drafts API on D1
+- [ ] Migration `0001` (`drafts`, `draft_revisions`, `images`, §4.9.5) and the `DB` binding.
+- [ ] Endpoints: list, create, get, autosave `PUT` with `baseRev` (409 on a stale rev), discard, revisions, restore. Validate with `postFrontmatter.partial()` and a 512 KB body cap. Bound parameters only, and every batch statement guarded.
+- [ ] Revisions: every `publish` revision kept, others capped at 50, a `conflict` snapshot before an overwrite.
+- [ ] `deploy.yml` runs `wrangler d1 migrations apply blog --remote` before `wrangler deploy`. Migrations are expand-only, because `wrangler rollback` doesn't roll back D1. E2E applies them `--local`.
+- [ ] `backup.yml`: nightly `wrangler d1 export`, uploaded into `blog-backups` with the S3 API, in the `main` environment, with the backup-only credentials (hosting guide §2.9), printing no content.
+
+**Done when:** unit tests cover a successful save, a stale save (409, row unchanged), the revision cap and the conflict snapshot. E2E creates, saves and reloads a draft. The production migration applies from the deploy job. The first nightly backup object appears in `blog-backups`, and the run log has no draft text.
+
+### Step 10.5: Editor
+- [ ] TipTap, lazy-loaded in `/admin/drafts/:id`. Toolbar: H2, H3, H4, bold, italic, code, link, lists, quote, code block, rule. Raw Markdown tab. Markdown paste.
+- [ ] Metadata panel checked live against `postFrontmatter` (summary counter, tags normalised). No cover picker (§7); an imported `cover` is kept as it is.
+- [ ] Autosave (2 s debounce, 10 s max wait), conflict banner, `BroadcastChannel`, `localStorage` crash copy, stop after 3 errors, revisions drawer with restore.
+- [ ] Preview with `renderMarkdown` and Shiki loaded on first use, styled with the public `.prose` CSS.
+- [ ] "Download .md" and "Copy as Markdown" that produce the exact `content/blog/YYYY-MM-DD-slug.md` file, and mark the draft's images `published = 1`.
+- [ ] Bundle check: no public route chunk contains `@tiptap` or the bridge.
+
+**Done when:** e2e types a title, an H2, bold and italic text, reloads, and sees the same content, and the stored `body_md` equals the expected Markdown. Two browser contexts show the 409 banner, and Overwrite keeps the other version as a revision. The downloaded file, committed by hand, builds and deploys. It works with the keyboard only and has been tried on a real phone (iOS Safari and Android Chrome).
+
+### Step 10.6: Image sections
+- [ ] `PHOTOS` R2 binding. `POST /api/admin/images` and `PUT /api/admin/images/:id/:width` with magic-byte sniffing that must match the row's `ext`, the metadata refusal (Exif, XMP, PNG `eXIf`, WebP `EXIF`/`XMP `, GIF XMP), the 10 MB cap and immutable metadata. GIFs are stored as `blog/<id>.gif` (§4.9.6).
+- [ ] Browser: `createImageBitmap`, canvas resize, WebP with a `blob.type` check, `@jsquash/webp` or JPEG fallback, GIF (sniffed from its bytes) as is, upload progress.
+- [ ] Figure node view: preview, required alt, size picker, Move up / Move down (`Alt+Shift+Up/Down`), Remove, inline caption.
+- [ ] Orphan marking on save, deletes on discard (unpublished images only), and the daily cron clean-up.
+
+**Done when:** unit tests accept JPEG, PNG, WebP and GIF and refuse with 415 SVG, HTML, a renamed file, a type that differs from the row, and a raw phone JPEG that carries GPS. Re-encoded output has no `Exif` segment, and a GIF lands at a key with no width suffix. E2E inserts an image, moves it above a paragraph, the Markdown shows the `::figure` line in its new place, and the preview renders `figure` and `figcaption`. Discarding a draft after **Download .md** leaves its images in R2. The cron test deletes only stale `pending` rows and unpublished orphans. A JPEG uploaded from a phone in production shows up at `photos.ry-mart.com` with the immutable header and no GPS data.
+
+### Step 10.7: Owner setup, part 2: repo settings and GitHub App (no code)
+- [ ] Hosting guide §2.10: fix the `main` ruleset to match §2.4 (0 approvals, which the owner sets, required `ci`, Restrict updates off). Turn on Automatically delete head branches and leave Allow auto-merge off. From now on your own PRs merge by hand without the admin bypass once `ci` passes.
+- [ ] Add the "bot scope" ruleset: restrict creations and updates on every branch except `main` and `blog/**`, with the Admin role, Dependabot and the Claude GitHub App as bypass actors.
+- [ ] Create the GitHub App (Contents RW, Pull requests RW, Actions R, Checks R, no Workflows, no webhook), install it on this repo only, pipe the key through the PKCS#8 conversion into the Worker secret (the `.pem` stays outside the repo) and set the three `GITHUB_APP_*` Worker secrets. Never add the App as a bypass actor.
+
+**Done when:** every ✅ check in §2.10 up to check 10 passes. A throwaway PR can't be merged while `ci` runs and merges by hand once it passes, with no approval and no bypass. A local `test/x` push and a Claude Code `claude/test` push both still work.
+
+### Step 10.8: CI guard for bot PRs (must merge before 10.9)
+- [ ] First step of the `ci` job, on `pull_request` only, inline in the YAML and before checkout and `pnpm install`: read the PR's files and commits from the API and fail when the PR author is the App's bot, or any commit has the bot as committer, and a changed file is outside `content/blog/`. No repo script runs.
+- [ ] First step of `deploy.yml`, before checkout: fail when `github.actor`, or the author or merger of the PR behind the commit, is the bot and the compare API's file list for `<before>...<sha>` touches anything outside `content/blog/`.
+- [ ] `scripts/app-token.ts` (`pnpm app-token --key <path>`): signs the App JWT with `jose` from the downloaded key and prints an installation token, for the §2.10 checks.
+
+**Done when:** with an App token from `pnpm app-token`: it can create `blog/test` and is refused on `test`. A test PR that touches `README.md` fails `ci` and can't be merged, and one that only adds `content/blog/x.md` passes. Merging a green PR that edits `.github/workflows/` is refused. Merging a green owner PR that touches `README.md` with the App token makes the deploy fail at the guard (then revert it). §2.10 check 11 passes and the `.pem` is deleted.
+
+### Step 10.9: Publish from the editor
+- [ ] `worker/github.ts`: App JWT (`jose`, RS256, `iat` now − 60 s, `exp` + 9 min), installation token cached per isolate, `User-Agent`, typed calls for refs, trees, commits, pulls, GraphQL. `GITHUB_API_BASE` override on localhost only, for the e2e stub.
+- [ ] Frontmatter writer (`JSON.stringify` per value), slug generator, path allowlist, uniqueness check against `main` and open `blog/*` PRs, and the check that every figure key is `ready`.
+- [ ] `POST …/publish`: one commit (author from the plain var `GIT_AUTHOR`, the owner's no-reply address), branch and PR. The Worker never merges and never turns on auto-merge; the owner merges (§4.9.7). Publishing again while the PR is open adds a commit to the same branch, refreshes the body and comments with what changed.
+- [ ] PR title and body (§4.9.7): `Publish:`, `Update:` or `Unpublish: <title>`; an overview (URL, summary, tags, reading time, created and updated dates); the figures inline from `photos.ry-mart.com` with their alt text; "What changed" (frontmatter old → new and a section-level body summary for an update); a short review checklist.
+- [ ] Dates: republishing a published post sets `updated` to the publish day and never changes `date`. The display half shipped with Step 10.2: `blog.$slug` already shows "<date> • Updated <date>", the second part only when they differ.
+- [ ] Confirm dialog with the exposure and timing warning.
+- [ ] `GET /api/admin/posts` (one GraphQL tree query, cached by tree SHA) and Edit-from-`main` import with the `base_sha` check.
+- [ ] On `blog.$slug`, a client-only probe behind `owner_hint` that shows "Edit" linking to `/admin/posts/<slug>` with a full page load. It ships here because that route needs the import above.
+
+**Done when:** Vitest with fetch fakes covers the happy path, slug collision, `base_sha` 409, token expiry, no request to a merge or auto-merge endpoint, no request body containing `OWNER_EMAIL`, and the PR title and body for a new post, an update and an unpublish. The frontmatter round-trips through `gray-matter` and `postFrontmatter`, and a republish changes `updated` but not `date`. E2E: a visitor without the cookie makes zero `/api/admin` requests (Playwright request log), the prerendered post has no admin markup, Edit appears with the cookie and test token and opens the imported draft, and without the token there is no Edit link and no uncaught exception or app-logged error (the browser's own failed-request message for `/api/admin/me` is filtered). A real test post published from production opens a PR with the overview, the owner merges it, and the post is live at `/blog/<slug>` within about 2 minutes of the merge.
+
+### Step 10.10: Publish status, cancel and unpublish
+- [ ] `GET …/status` (one GraphQL PR query, the deploy run for the merge SHA, `/api/health`) and the timeline in the editor: PR opened → CI running → waiting for your review → merged → deploying → Live, with links. A PR closed without a merge puts the draft back to Draft.
+- [ ] CI failed: "Fix and republish" or "Cancel" (closes the PR, deletes the branch). Deploy failed: link to the run.
+- [ ] Unpublish (a `sha: null` tree entry through the same PR flow). Images get `published = 1` when Live.
+
+**Done when:** e2e against the GitHub stub walks every stage (the stub plays the owner's merge), including a CI failure and a PR closed on GitHub. In production, a deliberately broken post shows "CI failed" with a working link, Cancel closes the PR and deletes the branch, and the test post from Step 10.9 is unpublished through an `Unpublish:` PR the owner merges, and returns 404.
+
+### Step 10.11: Hardening
+- [ ] Draft privacy fixture test: a seeded draft's text and image keys never appear in `posts.json`, RSS, the sitemap, the search index or a PR body.
+- [ ] Runbook drills (hosting guide §6): revoke Access sessions, restore a draft from a revision, from Time Travel and from a `blog-backups` export, rotate the App key, emergency takedown with a WAF rule.
+
+**Done when:** the authoring checks in the go-live checklist (hosting guide §5) pass on production, each drill has been done once, and the Lighthouse and axe budgets still pass.
 
 ---
 
@@ -306,6 +444,8 @@ from the nav yet.
 | M3: Media and discovery | 5–6 | Photo gallery, tag pages and site-wide search |
 | M4: Games | 7–8 | 1v1 tic-tac-toe with lobby codes, playable across devices |
 | M5: Launch | 9 | Quality gates, monitoring, the complete go-live checklist |
+| M6: Private drafts | 10.0–10.6 | Owner-only editor with header sizes, bold, italics and image sections. Posts are published by committing the downloaded `.md`. |
+| M7: Publish from the browser | 10.7–10.11 | One click from draft to a PR with an overview of the changes. The owner merges it and the post is live about a minute later, with progress, cancel and unpublish. |
 
 ## Definition of done (applies to every step)
 

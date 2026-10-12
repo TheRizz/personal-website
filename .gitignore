@@ -3,6 +3,9 @@
 .env.*
 !.env.example
 .dev.vars*
+*.pem
+*.key
+e2e/.auth/
 .vscode/settings.json
 
 # Dependencies and build output

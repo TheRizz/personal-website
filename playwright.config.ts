@@ -17,14 +17,17 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 5_000 },
   reporter: CI ? [["github"], ["html", { open: "never" }]] : [["list"]],
+  // Checks that the build accepts the e2e test identity before any test runs.
+  globalSetup: "./e2e/global-setup.ts",
   use: {
     baseURL: `http://localhost:${PORT}`,
     trace: "retain-on-failure",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: {
-    // CI builds in its own earlier step (clearer failures), so it only serves that build here.
-    command: CI ? preview : `pnpm build && ${preview}`,
+    // CI builds in its own earlier steps (clearer failures), so it only serves that build here.
+    // The test identity must exist before the build, which copies .dev.vars into its output.
+    command: CI ? preview : `pnpm e2e:keys && pnpm build && ${preview}`,
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: !CI,
     timeout: 180_000,

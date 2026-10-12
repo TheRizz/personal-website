@@ -1,6 +1,13 @@
 {
   "extends": "../../tsconfig.base.json",
-  "include": ["vite.config.ts", "vitest.config.ts", "react-router.config.ts"],
+  "include": [
+    "vite.config.ts",
+    "vitest.config.ts",
+    "react-router.config.ts",
+    "static-headers.ts",
+    "static-headers.test.ts",
+    "worker/security-headers.ts"
+  ],
   "compilerOptions": {
     "composite": true,
     "types": ["node"]

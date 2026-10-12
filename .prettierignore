@@ -4,3 +4,7 @@ apps/web/app/generated/
 worker-configuration.d.ts
 .react-router/
 build/
+# Posts are written by the editor's Markdown bridge (packages/content-markdown), which uses `*`
+# emphasis where Prettier would write `_`; the golden fixtures must stay byte for byte.
+content/blog/
+packages/content-markdown/src/fixtures/

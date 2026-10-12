@@ -25,12 +25,32 @@ jobs:
         with:
           node-version-file: .nvmrc
           cache: pnpm
+      - name: Keep the e2e test identity out of the Worker config
+        run: |
+          if grep -nE 'ACCESS_TEST_JWKS|GITHUB_API_BASE' apps/web/wrangler.jsonc; then
+            echo "::error file=apps/web/wrangler.jsonc::Test-only settings belong in the gitignored .dev.vars, never in wrangler.jsonc."
+            exit 1
+          fi
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm format:check
       - run: pnpm typecheck
       - run: pnpm test
+      # Before the build, which copies .dev.vars (the localhost-only test key) into its output.
+      - run: pnpm e2e:keys
       - run: pnpm build
+      # Requests every figure image, so only PRs that change posts depend on photos.ry-mart.com.
+      - name: Check figure images
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          if git diff --quiet "$BASE_SHA" HEAD -- content/blog/; then
+            echo "No changes under content/blog/; skipping."
+          else
+            pnpm content --check-images
+          fi
       - run: pnpm exec playwright install --with-deps --only-shell chromium
       - run: pnpm e2e
         env:

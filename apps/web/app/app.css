@@ -69,6 +69,8 @@
     scrollbar-gutter: stable;
     scrollbar-width: thin;
     -webkit-text-size-adjust: 100%;
+    /* `cqw` is then the page width without the scrollbar gutter, unlike `vw` (figures below). */
+    container-type: inline-size;
   }
 
   body {
@@ -171,6 +173,40 @@
   .prose th,
   .prose td {
     @apply border-b border-line px-3 py-2 text-left;
+  }
+
+  /*
+   * Image sections (::figure). `column` keeps to the text; `wide` and `full` break out of it,
+   * centred on the page. They are sized in `cqw` of the root, not `vw`: `vw` includes a classic
+   * scrollbar's gutter, which would push them off centre and past the edge. The `sizes` in
+   * packages/content-markdown/src/figure.ts match these widths.
+   */
+  .prose .figure {
+    margin-block: 2.5rem;
+  }
+  .prose .figure--wide {
+    width: min(68.75rem, 100cqw);
+    margin-inline: calc((100% - min(68.75rem, 100cqw)) / 2);
+  }
+  .prose .figure--full {
+    width: 100cqw;
+    margin-inline: calc(50% - 50cqw);
+  }
+  /* Edge to edge: no rounded corners or side borders (wide only once it fills the screen). */
+  .prose .figure--full img {
+    @apply w-full rounded-none border-x-0;
+  }
+  @media (width < 68.75rem) {
+    .prose .figure--wide img {
+      @apply rounded-none border-x-0;
+    }
+  }
+  .prose figcaption {
+    @apply mx-auto mt-3 max-w-[72ch] px-6 text-center text-sm leading-relaxed text-muted;
+    text-wrap: balance;
+  }
+  .prose .figure--column figcaption {
+    @apply px-0;
   }
 
   /* Shiki emits both themes as CSS variables; pick one from the active theme. */

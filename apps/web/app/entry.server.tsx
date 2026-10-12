@@ -8,14 +8,17 @@ export default async function handleRequest(
   responseStatusCode: number,
   responseHeaders: Headers,
   routerContext: EntryContext,
-  _loadContext: AppLoadContext,
+  loadContext: AppLoadContext | undefined,
 ) {
   let shellRendered = false;
   const userAgent = request.headers.get("user-agent");
+  // The Worker's CSP nonce. Prerendering has none: `_headers` allows those pages' scripts by hash.
+  const nonce = loadContext?.cspNonce;
 
   const body = await renderToReadableStream(
-    <ServerRouter context={routerContext} url={request.url} />,
+    <ServerRouter context={routerContext} url={request.url} nonce={nonce} />,
     {
+      nonce,
       onError(error: unknown) {
         responseStatusCode = 500;
         // Errors before the shell renders reject the promise and are logged by React Router.

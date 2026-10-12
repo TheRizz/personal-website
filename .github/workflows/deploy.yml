@@ -20,14 +20,16 @@ jobs:
     environment:
       name: main
       url: https://ry-mart.com
+    # CLOUDFLARE_API_TOKEN is set only on the steps that need it, never while dependencies are
+    # installed or the site is built (design doc §4.8).
     env:
-      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
       SITE_URL: https://ry-mart.com
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check Cloudflare credentials
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           DEPLOY_ENVIRONMENT: main
           TOKEN_IN_VARIABLES: ${{ vars.CLOUDFLARE_API_TOKEN != '' }}
         run: bash .github/scripts/check-cloudflare-env.sh
@@ -38,11 +40,27 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      # GITHUB_SHA is baked into the build and reported by /api/health.
+      # GITHUB_SHA is baked into the build and reported by /api/health. Nothing here writes
+      # .dev.vars: the e2e test identity never reaches a production build.
       - run: pnpm build
+
+      # The owner gate refuses every admin request without OWNER_EMAIL, so a missing secret only
+      # disables the admin area. This warns until Step 10.0 is done; then it becomes a hard check.
+      - name: Check the OWNER_EMAIL secret
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          if ! secrets=$(pnpm exec wrangler secret list --format json); then
+            echo "::warning title=Could not list Worker secrets::OWNER_EMAIL was not checked."
+          elif ! jq -e 'any(.[]; .name == "OWNER_EMAIL")' <<<"$secrets" >/dev/null; then
+            echo "::warning title=OWNER_EMAIL is not set::The admin area refuses every request until it is. Run 'pnpm wrangler secret put OWNER_EMAIL' in apps/web (hosting guide §2.9)."
+          fi
 
       - name: Deploy
         working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm exec wrangler deploy
 
       - name: Smoke test
@@ -52,6 +70,15 @@ jobs:
             version=$(curl -fsS "$SITE_URL/api/health" | jq -r .version || true)
             if [ "$version" = "$GITHUB_SHA" ] && curl -fsS -o /dev/null "$SITE_URL/"; then
               echo "Live version is $version"
+              if ! curl -fsSI "$SITE_URL/" | grep -qi '^content-security-policy:'; then
+                echo "::error::/ has no Content-Security-Policy header"
+                exit 1
+              fi
+              admin=$(curl -sS -o /dev/null -w '%{http_code}' "$SITE_URL/api/admin/me")
+              if [ "$admin" = 200 ]; then
+                echo "::error::/api/admin/me answered an anonymous request"
+                exit 1
+              fi
               exit 0
             fi
             echo "Attempt $attempt: live version is '${version:-none}', waiting for $GITHUB_SHA"
@@ -62,4 +89,6 @@ jobs:
       - name: Roll back after a failed smoke test
         if: failure() && steps.smoke.outcome == 'failure'
         working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: pnpm exec wrangler rollback --yes --message "Smoke test failed for $GITHUB_SHA"

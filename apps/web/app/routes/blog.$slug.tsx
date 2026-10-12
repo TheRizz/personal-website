@@ -1,6 +1,6 @@
 import { data, Link } from "react-router";
+import { PostDates } from "~/components/PostDates";
 import { ReadingProgress } from "~/components/ReadingProgress";
-import { formatLongDate } from "~/lib/dates";
 import { pageMeta } from "~/lib/meta";
 import { getPost } from "~/lib/posts.server";
 import type { Route } from "./+types/blog.$slug";
@@ -31,8 +31,7 @@ export default function BlogPost({ loaderData: { post, newer, older } }: Route.C
             {post.title}
           </h1>
           <p className="text-sm text-muted">
-            <time dateTime={post.date}>{formatLongDate(post.date)}</time> • {post.readingMinutes}{" "}
-            min read
+            <PostDates date={post.date} updated={post.updated} /> • {post.readingMinutes} min read
           </p>
           {post.tags.length > 0 && (
             <ul aria-label="Tags" className="mt-4 flex flex-wrap justify-center gap-2">
