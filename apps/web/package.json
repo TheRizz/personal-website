@@ -8,11 +8,13 @@
     "preview": "react-router build && vite preview",
     "typegen": "wrangler types && react-router typegen",
     "typecheck": "pnpm typegen && tsc -b",
-    "deploy": "wrangler deploy"
+    "deploy": "wrangler deploy",
+    "db:migrate:local": "wrangler d1 migrations apply blog --local"
   },
   "dependencies": {
     "@fontsource/geist-sans": "^5.3.0",
     "@fontsource/jetbrains-mono": "^5.3.0",
+    "@site/content-schema": "workspace:*",
     "@site/game-core": "workspace:*",
     "isbot": "^5.1.32",
     "jose": "6.2.12",
@@ -24,7 +26,6 @@
   "devDependencies": {
     "@cloudflare/vite-plugin": "^1.63.1",
     "@react-router/dev": "^7.18.4",
-    "@site/content-schema": "workspace:*",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^24.0.0",
     "@types/react": "^19.2.7",

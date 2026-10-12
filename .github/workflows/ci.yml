@@ -51,6 +51,7 @@ jobs:
           else
             pnpm content --check-images
           fi
+      - run: pnpm db:migrate:local
       - run: pnpm exec playwright install --with-deps --only-shell chromium
       - run: pnpm e2e
         env:

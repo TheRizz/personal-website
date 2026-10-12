@@ -27,7 +27,8 @@ export default defineConfig({
   webServer: {
     // CI builds in its own earlier steps (clearer failures), so it only serves that build here.
     // The test identity must exist before the build, which copies .dev.vars into its output.
-    command: CI ? preview : `pnpm e2e:keys && pnpm build && ${preview}`,
+    // Local D1 gets the migrations, as production does before each deploy.
+    command: CI ? preview : `pnpm e2e:keys && pnpm build && pnpm db:migrate:local && ${preview}`,
     url: `http://localhost:${PORT}/api/health`,
     reuseExistingServer: !CI,
     timeout: 180_000,

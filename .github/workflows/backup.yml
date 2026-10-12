@@ -1,0 +1,75 @@
+name: backup
+
+# Nightly export of the drafts database into the private R2 bucket blog-backups (design doc
+# §4.9.5). Actions logs on a public repo are public, so nothing here prints database content:
+# wrangler writes the export to a file, and only its size is logged.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # The backup-only credentials live in the main environment (hosting guide §2.9).
+    environment: main
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - name: Check the backup credentials
+        id: credentials
+        env:
+          HAS_D1_TOKEN: ${{ secrets.BACKUP_D1_TOKEN != '' }}
+          HAS_R2_KEY: ${{ secrets.BACKUP_R2_KEY_ID != '' && secrets.BACKUP_R2_SECRET != '' }}
+        run: |
+          if [ "$HAS_D1_TOKEN" != true ] || [ "$HAS_R2_KEY" != true ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::warning title=Backup skipped::Add BACKUP_D1_TOKEN, BACKUP_R2_KEY_ID and BACKUP_R2_SECRET to the main environment (hosting guide §2.9)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.credentials.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: steps.credentials.outputs.ready == 'true'
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - if: steps.credentials.outputs.ready == 'true'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+      - if: steps.credentials.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile --filter web
+
+      - name: Export the database
+        if: steps.credentials.outputs.ready == 'true'
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.BACKUP_D1_TOKEN }}
+        run: |
+          pnpm exec wrangler d1 export blog --remote --output "$RUNNER_TEMP/blog.sql" > /dev/null
+          gzip -9 "$RUNNER_TEMP/blog.sql"
+          echo "Export size: $(stat -c %s "$RUNNER_TEMP/blog.sql.gz") bytes"
+
+      - name: Upload to blog-backups
+        if: steps.credentials.outputs.ready == 'true'
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.BACKUP_R2_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          key="d1/blog-$(date -u +%Y-%m-%dT%H%M%SZ).sql.gz"
+          aws s3 cp "$RUNNER_TEMP/blog.sql.gz" "s3://blog-backups/$key" \
+            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --only-show-errors
+          echo "Uploaded $key"
+          rm -f "$RUNNER_TEMP/blog.sql.gz"

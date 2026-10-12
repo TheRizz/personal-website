@@ -44,8 +44,8 @@ jobs:
       # .dev.vars: the e2e test identity never reaches a production build.
       - run: pnpm build
 
-      # The owner gate refuses every admin request without OWNER_EMAIL, so a missing secret only
-      # disables the admin area. This warns until Step 10.0 is done; then it becomes a hard check.
+      # The owner gate refuses every admin request without OWNER_EMAIL. It was set in Step 10.0,
+      # so a missing secret now means something removed it: stop before deploying.
       - name: Check the OWNER_EMAIL secret
         working-directory: apps/web
         env:
@@ -54,8 +54,17 @@ jobs:
           if ! secrets=$(pnpm exec wrangler secret list --format json); then
             echo "::warning title=Could not list Worker secrets::OWNER_EMAIL was not checked."
           elif ! jq -e 'any(.[]; .name == "OWNER_EMAIL")' <<<"$secrets" >/dev/null; then
-            echo "::warning title=OWNER_EMAIL is not set::The admin area refuses every request until it is. Run 'pnpm wrangler secret put OWNER_EMAIL' in apps/web (hosting guide §2.9)."
+            echo "::error title=OWNER_EMAIL is not set::Run 'pnpm wrangler secret put OWNER_EMAIL' in apps/web (hosting guide §2.9)."
+            exit 1
           fi
+
+      # Before the Worker that needs them. Migrations only ever add (never drop or rename), because
+      # `wrangler rollback` restores the Worker but not the database.
+      - name: Apply D1 migrations
+        working-directory: apps/web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: pnpm exec wrangler d1 migrations apply blog --remote
 
       - name: Deploy
         working-directory: apps/web
