@@ -334,11 +334,11 @@ one-click publishing.
 - [x] Answer §8 Q6–14 and set ADR-0004 and ADR-0005 to *Accepted* (2026-10-12). ADR-0005 is amended: the owner merges every publish PR by hand.
 - [x] A card on file and the R2 billing alert (§2.8 step 5).
 - [x] The GitHub default branch is `main` (§2.4 step 1).
-- [ ] Hosting guide §2.7: turn on Zero Trust Free and create the "Site admin" Access app (paths `admin` and `api/admin`, the Cloudflare login, owner-only policy, 24-hour sessions, SameSite Lax, HttpOnly, Binding cookie, empty CORS).
+- [x] Hosting guide §2.7: turn on Zero Trust Free and create the "Site admin" Access app (paths `admin` and `api/admin`, the Cloudflare login, owner-only policy, 24-hour sessions, SameSite Lax, HttpOnly, Binding cookie, empty CORS).
 - [ ] Hosting guide §2.8: create the D1 database `blog` and the private bucket `blog-backups`. Finish §2.2 (`photos` and `photos.ry-mart.com`) if it isn't done. Add the `nosniff` Transform Rule.
 - [ ] Hosting guide §2.9: `wrangler secret put OWNER_EMAIL`. Add Account · D1 · Edit to the CI token (§2.3). Create the backup-only D1 token and the R2 key scoped to `blog-backups`.
 - [ ] Confirm the `main` environment only deploys from `main` (§2.4 check).
-- [ ] Send back the team domain, the AUD tag and the D1 `database_id` (none is secret), so a follow-up commit fills them in (Access vars in Step 10.1, the `DB` binding in Step 10.4).
+- [ ] Send back the team domain, the AUD tag and the D1 `database_id` (none is secret), so a follow-up commit fills them in (Access vars in Step 10.1, the `DB` binding in Step 10.4). The team domain (`tight-boat-6333`) and AUD tag arrived on 2026-10-12 and are in `wrangler.jsonc`; the D1 id is still to come.
 
 **Done when:** every ✅ check in hosting guide §2.7–2.9 passes, `curl -sI https://ry-mart.com/admin` returns `302` to `<team>.cloudflareaccess.com`, and the team domain, AUD tag and D1 id have been sent back.
 

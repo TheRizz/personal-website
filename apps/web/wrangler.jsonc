@@ -40,11 +40,11 @@
   "workers_dev": false,
   "preview_urls": false,
 
-  // Cloudflare Access for the admin area (hosting guide §2.7); neither value is secret. Empty
-  // until the owner finishes Step 10.0, and the owner gate refuses every admin request while they
-  // are. The owner's e-mail is the OWNER_EMAIL secret, never a var.
+  // Cloudflare Access for the admin area (hosting guide §2.7); neither value is secret. If either
+  // is empty or malformed, the owner gate refuses every admin request. The owner's e-mail is the
+  // OWNER_EMAIL secret, never a var.
   "vars": {
-    "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": "",
+    "ACCESS_TEAM_DOMAIN": "https://tight-boat-6333.cloudflareaccess.com",
+    "ACCESS_AUD": "7ae08ee40e3b5eb832ad77322d4cf20f0459d08490194adedb349dd6a963a31f",
   },
 }
