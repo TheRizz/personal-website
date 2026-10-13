@@ -1,13 +1,18 @@
 /**
  * Reads content/** and writes typed JSON to apps/web/app/generated/ (design doc §3.1).
- * Usage: tsx scripts/build-content.ts [--drafts] [--check-images]
+ * Usage: tsx scripts/build-content.ts [--drafts] [--check-images] [--content <dir>] [--out <dir>]
  *
  * `--check-images` also requests every figure image from photos.ry-mart.com and fails if one is
  * missing. CI runs it only when content/blog changes, so other PRs never depend on that host.
+ *
+ * `--content` and `--out` replace `content/` and `apps/web/app/generated/`, so a test can build
+ * a fixture tree into a temporary directory. Everything the build writes goes in the out
+ * directory: the draft privacy test (apps/web/worker/draft-privacy.test.ts) reads all of it.
  */
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 import {
   MarkdownError,
   SHIKI_THEMES,
@@ -19,11 +24,22 @@ import { postFrontmatter, readingMinutes, type Post } from "@site/content-schema
 import matter from "gray-matter";
 import { bundledLanguages, createHighlighter } from "shiki";
 
+const { values: args } = parseArgs({
+  // pnpm hands a `--` on to the script, as in `pnpm content -- --drafts`.
+  args: process.argv.slice(2).filter((arg) => arg !== "--"),
+  options: {
+    drafts: { type: "boolean", default: false },
+    "check-images": { type: "boolean", default: false },
+    content: { type: "string" },
+    out: { type: "string" },
+  },
+});
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const blogDir = path.join(root, "content/blog");
-const outDir = path.join(root, "apps/web/app/generated");
-const includeDrafts = process.argv.includes("--drafts");
-const checkImages = process.argv.includes("--check-images");
+const contentDir = args.content ? path.resolve(args.content) : path.join(root, "content");
+const blogDir = path.join(contentDir, "blog");
+const outDir = args.out ? path.resolve(args.out) : path.join(root, "apps/web/app/generated");
+const includeDrafts = args.drafts;
+const checkImages = args["check-images"];
 
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 
@@ -45,8 +61,9 @@ async function buildPosts(): Promise<Built[]> {
   });
 
   for (const name of files) {
-    const file = path.relative(root, path.join(blogDir, name));
-    const source = await readFile(path.join(root, file), "utf8");
+    // Named from the content directory's parent, `content/blog/x.md`, for a fixture tree too.
+    const file = path.relative(path.dirname(contentDir), path.join(blogDir, name));
+    const source = await readFile(path.join(blogDir, name), "utf8");
     const { data, content } = matter(source);
     const parsed = postFrontmatter.safeParse(data);
     if (!parsed.success) {

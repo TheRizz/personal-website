@@ -711,8 +711,8 @@ export type GitHubFake = Awaited<ReturnType<typeof createGitHubFake>>;
 
 /**
  * What a test must never see in any request: a route outside the allowlist, a GraphQL mutation,
- * a merge endpoint, the owner's address, or any of `forbidden` (draft ids, another draft's text).
- * Returns one line per problem.
+ * a merge endpoint, or the owner's address or any of `forbidden` (draft ids, another draft's
+ * text) in its URL, headers or body. Returns one line per problem.
  */
 export function auditRequests(
   requests: RecordedRequest[],
@@ -721,7 +721,7 @@ export function auditRequests(
   const problems: string[] = [];
   for (const request of requests) {
     const where = `${request.method} ${request.route ?? request.path}`;
-    const texts = [request.url, request.text ?? ""];
+    const texts = [request.url, JSON.stringify(request.headers), request.text ?? ""];
     if (request.route === null) problems.push(`unknown route: ${request.method} ${request.path}`);
     if (request.route === "/graphql" && /\bmutation\b/i.test(request.text ?? "")) {
       problems.push(`GraphQL mutation: ${where}`);

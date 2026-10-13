@@ -129,6 +129,10 @@ test("Sign out clears the owner hint and goes to the Access logout", async ({ pa
   expect((await page.context().cookies()).map((cookie) => cookie.name)).toContain("owner_hint");
   // Locally there is no Access, so the logout path is just a missing page.
   await page.route("**/cdn-cgi/access/logout", (route) => route.fulfill({ body: "Signed out" }));
+  // React Router fetches route manifest patches for each new link on the page, 100 ms after it
+  // appears. Leaving while one is in flight would log that fetch as a failure, and this page's
+  // lists bring their links in after their data loads.
+  await page.waitForLoadState("networkidle");
   await page.getByRole("link", { name: "Sign out" }).click();
   await expect(page).toHaveURL(/\/cdn-cgi\/access\/logout$/);
   expect((await page.context().cookies()).map((cookie) => cookie.name)).not.toContain("owner_hint");
