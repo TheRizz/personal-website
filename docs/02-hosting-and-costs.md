@@ -152,7 +152,8 @@ check you can run to confirm it worked.
    - Homepage `https://ry-mart.com`. Webhook off. "Only on this account".
    - Repository permissions: **Contents** read and write, **Pull requests** read and write, **Actions** read, **Checks** read. Metadata read is automatic. **Workflows: no access.**
    - Generate a private key. **Install** the App on `personal-website` only.
-   - Note the **Client ID**, the **installation ID** (the number at the end of the installation's settings URL) and the bot login, `<app-slug>[bot]` (Step 10.8 needs it).
+   - Note the **Client ID**, the **installation ID** (the number at the end of the installation's settings URL) and the bot login, `<app-slug>[bot]`.
+   - **Settings → Secrets and variables → Actions → Variables → New repository variable** `PUBLISH_BOT` = the bot login, for example `ry-mart-publisher[bot]`. The guards in `ci.yml` and `deploy.yml` (Step 10.8) use it to recognise the App, and `deploy.yml` refuses to deploy once the Worker has the App's key but this variable is missing. It isn't secret.
    - Never add the App as a bypass actor in any ruleset.
 5. Convert and store the key. Keep the downloaded `.pem` **outside the repo** (for example `~/keys/`) and never copy it into the working tree; the repo is public. The conversion is piped, so no converted file is written:
    ```sh
@@ -167,7 +168,14 @@ check you can run to confirm it worked.
 8. ✅ Check: on a throwaway PR, merging is blocked while `ci` runs. Once it passes, **Squash and merge** works by hand with no approval and no bypass, and the head branch is deleted.
 9. ✅ Check: `pnpm wrangler secret list` shows the three `GITHUB_APP_*` names. The App's installation page lists only `personal-website`.
 10. ✅ Check: your own branch pushes still work with `bot scope` on. Push a new `test/x` branch from your local git, and have a Claude Code session push a `claude/test` branch. Delete both. If the Claude push is refused, add that App as a bypass actor (step 3).
-11. ✅ Check (after Step 10.8 merges): `GH_TOKEN=$(pnpm app-token --key ~/keys/<app>.pem) gh api …` with the App token can create `blog/test` and is refused on `test`. Then delete the `.pem`.
+11. ✅ Check (after Step 10.8 merges): with `export GH_TOKEN=$(pnpm app-token --key ~/keys/<app>.pem --client-id <Client ID>)`, the App token can create `blog/test` and is refused on `test`:
+    ```sh
+    main=$(gh api repos/TheRizz/personal-website/git/ref/heads/main --jq .object.sha)
+    gh api repos/TheRizz/personal-website/git/refs -f ref=refs/heads/blog/test -f sha="$main"   # works
+    gh api repos/TheRizz/personal-website/git/refs -f ref=refs/heads/test -f sha="$main"        # refused
+    gh api -X DELETE repos/TheRizz/personal-website/git/refs/heads/blog/test
+    ```
+    Then `unset GH_TOKEN` and delete the `.pem`.
 
 ---
 

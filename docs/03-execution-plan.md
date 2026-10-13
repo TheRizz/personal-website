@@ -432,11 +432,22 @@ one-click publishing.
 **Done when:** every ✅ check in §2.10 up to check 10 passes. A throwaway PR can't be merged while `ci` runs and merges by hand once it passes, with no approval and no bypass. A local `test/x` push and a Claude Code `claude/test` push both still work.
 
 ### Step 10.8: CI guard for bot PRs (must merge before 10.9)
-- [ ] First step of the `ci` job, on `pull_request` only, inline in the YAML and before checkout and `pnpm install`: read the PR's files and commits from the API and fail when the PR author is the App's bot, or any commit has the bot as committer, and a changed file is outside `content/blog/`. No repo script runs.
-- [ ] First step of `deploy.yml`, before checkout: fail when `github.actor`, or the author or merger of the PR behind the commit, is the bot and the compare API's file list for `<before>...<sha>` touches anything outside `content/blog/`.
-- [ ] `scripts/app-token.ts` (`pnpm app-token --key <path>`): signs the App JWT with `jose` from the downloaded key and prints an installation token, for the §2.10 checks.
+- [x] First step of the `ci` job, on `pull_request` only, inline in the YAML and before checkout and `pnpm install`: read the PR's files and commits from the API and fail when the PR author is the App's bot, or any commit has the bot as committer, and a changed file is outside `content/blog/`. No repo script runs.
+- [x] First step of `deploy.yml`, before checkout: fail when `github.actor`, or the author or merger of the PR behind the commit, is the bot and the compare API's file list for `<before>...<sha>` touches anything outside `content/blog/`.
+- [x] `scripts/app-token.ts` (`pnpm app-token --key <path>`): signs the App JWT with `jose` from the downloaded key and prints an installation token, for the §2.10 checks.
 
 **Done when:** with an App token from `pnpm app-token`: it can create `blog/test` and is refused on `test`. A test PR that touches `README.md` fails `ci` and can't be merged, and one that only adds `content/blog/x.md` passes. Merging a green PR that edits `.github/workflows/` is refused. Merging a green owner PR that touches `README.md` with the App token makes the deploy fail at the guard (then revert it). §2.10 check 11 passes and the `.pem` is deleted.
+
+> **Built 2026-10-13 (Step 10.8, code only).** The bot login is the repository variable
+> `PUBLISH_BOT` (hosting guide §2.10 step 4), not a value in the YAML, so it needs no code
+> change. While it is unset both guards pass, since there is no App; `deploy.yml` then fails if
+> the Worker has `GITHUB_APP_PRIVATE_KEY`, so the guards can't be off once the App exists. The
+> deploy guard also checks the merge commit's author and committer, and compares a manual run
+> with the commit's parent. `scripts/app-token.ts` signs with `node:crypto` (no `jose` at the
+> root), takes `--client-id` and finds the installation itself. The guard scripts were run
+> against canned API answers for the owner's PRs, a posts-only App PR, App PRs touching
+> `README.md` or renaming code into `content/blog/`, an App commit in an owner PR, and App and
+> owner merges; the Done-when checks need the App and are left for the owner.
 
 ### Step 10.9: Publish from the editor
 - [ ] `worker/github.ts`: App JWT (`jose`, RS256, `iat` now − 60 s, `exp` + 9 min), installation token cached per isolate, `User-Agent`, typed calls for refs, trees, commits, pulls, GraphQL. `GITHUB_API_BASE` override on localhost only, for the e2e stub.
