@@ -116,7 +116,12 @@ function failure(error: unknown): Response {
   if (error instanceof Refusal) return error.response;
   logPublishingError(error);
   if (error instanceof GitHubUnavailable) {
-    return publishError(503, error.code, "Publishing isn't available right now.");
+    // A misconfiguration names the setting to fix for the owner, the only reader; never a value.
+    const message =
+      error.code === "misconfigured" && error.detail
+        ? `Publishing isn't set up: ${error.detail}`
+        : "Publishing isn't available right now.";
+    return publishError(503, error.code, message);
   }
   if (error instanceof GitHubError) {
     return publishError(502, "github_error", "GitHub didn't answer as expected.");
@@ -307,7 +312,7 @@ async function publishDraft(request: Request, env: PublishEnv, id: string): Prom
     if (taken) throw slugTaken("draft");
   }
   const ownerEmail = ownerEmailOf(env);
-  if (!ownerEmail) throw new GitHubUnavailable("misconfigured");
+  if (!ownerEmail) throw new GitHubUnavailable("misconfigured", "OWNER_EMAIL isn't set.");
 
   // Everything that can be checked without GitHub, before the first call.
   const fields = fieldsOf(row, slug);

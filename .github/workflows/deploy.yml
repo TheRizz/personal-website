@@ -102,6 +102,16 @@ jobs:
             # Without it, the guards in ci.yml and above can't tell the App's PRs apart.
             echo "::error title=PUBLISH_BOT is not set::The Worker has the publishing App's key. Set the repository variable PUBLISH_BOT to the App's bot login (hosting guide §2.10)."
             exit 1
+          else
+            # Names only (never values), so the log shows which of the App's secrets are in place.
+            echo "Worker secrets: $(jq -r '[.[].name] | sort | join(", ")' <<<"$secrets")"
+            missing=$(for name in GITHUB_APP_PRIVATE_KEY GITHUB_APP_CLIENT_ID GITHUB_APP_INSTALLATION_ID; do
+              jq -e --arg name "$name" 'any(.[]; .name == $name)' <<<"$secrets" >/dev/null || echo "$name"
+            done)
+            # Some but not all of the three: publishing answers 503 until the rest are set.
+            if [ -n "$missing" ] && [ "$(wc -l <<<"$missing")" -lt 3 ]; then
+              echo "::warning title=Publishing is only partly set up::Missing Worker secrets: $(tr '\n' ' ' <<<"$missing")(hosting guide §2.10 step 5)."
+            fi
           fi
 
       # Before the Worker that needs them. Migrations only ever add (never drop or rename), because

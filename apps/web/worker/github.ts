@@ -54,9 +54,16 @@ const GRANTABLE: Record<string, "read" | "write"> = {
   metadata: "read",
 };
 
-/** Publishing can't run: not configured, or configured somewhere it must not run. */
+/**
+ * Publishing can't run: not configured, or configured somewhere it must not run. A
+ * misconfiguration carries `detail` for the owner: the setting or App permission to fix, never
+ * a value.
+ */
 export class GitHubUnavailable extends Error {
-  constructor(readonly code: "github_unavailable" | "misconfigured") {
+  constructor(
+    readonly code: "github_unavailable" | "misconfigured",
+    readonly detail?: string,
+  ) {
     super(code);
     this.name = "GitHubUnavailable";
   }
@@ -267,10 +274,31 @@ function someString(value: unknown, test: (text: string) => boolean): boolean {
 
 // ---- Configuration ----
 
-function misconfigured(name: string): GitHubUnavailable {
+/**
+ * The shape of a key value with none of its text: its size, its line count and whether the BEGIN
+ * and END lines are there, which tells a cut-off paste from a wrong file.
+ */
+function keyShape(pem: string): string {
+  const begin = /-----BEGIN ([A-Z ]+)-----/.exec(pem);
+  const end = /-----END ([A-Z ]+)-----/.exec(pem);
+  const lines = pem.split("\n").length;
+  return [
+    `${pem.length} characters on ${lines} line${lines === 1 ? "" : "s"}`,
+    begin ? `BEGIN ${begin[1]}` : "no BEGIN line",
+    end ? `END ${end[1]}` : "no END line",
+  ].join(", ");
+}
+
+/** What the owner is told when the key is set but can't be imported. */
+const unusableKey = (pem: string) =>
+  `GITHUB_APP_PRIVATE_KEY isn't a usable private key (${keyShape(pem)}); store the .pem ` +
+  "exactly as downloaded.";
+
+/** `name` is missing or wrong; `hint` tells the owner what to store there. */
+function misconfigured(name: string, hint = `${name} isn't set.`): GitHubUnavailable {
   // The name only: never the value.
   console.error("Publishing is misconfigured:", name);
-  return new GitHubUnavailable("misconfigured");
+  return new GitHubUnavailable("misconfigured", hint);
 }
 
 /** The author from `GIT_AUTHOR`, or null if it isn't a no-reply identity clear of the owner. */
@@ -302,10 +330,11 @@ function localBase(value: string): string | null {
 }
 
 /**
- * A PEM with LF line endings and no surrounding whitespace: the label and the base64 body. A paste
- * may leave spaces after the BEGIN line or indent the END line; both are allowed.
+ * A PEM with LF line endings and no surrounding whitespace: the label and the base64 body. The
+ * body may carry any whitespace or none: a paste may leave spaces after the BEGIN line, indent the
+ * END line, or (from a phone) drop the line breaks altogether.
  */
-const PEM = /^-----BEGIN ([A-Z ]+)-----[ \t]*\n([A-Za-z0-9+/=\s]+)\n[ \t]*-----END \1-----$/;
+const PEM = /^-----BEGIN ([A-Z ]+)-----([A-Za-z0-9+/=\s]+)-----END \1-----$/;
 /** DER for `INTEGER 0` and for `SEQUENCE { OID 1.2.840.113549.1.1.1 (rsaEncryption), NULL }`. */
 const DER_VERSION_0 = [0x02, 0x01, 0x00];
 const DER_RSA_ENCRYPTION = [
@@ -324,7 +353,8 @@ function der(tag: number, body: ArrayLike<number>): number[] {
  * The App's key as a PKCS#8 PEM, or null unless `pem` is a plain private key. GitHub downloads
  * App keys as PKCS#1 (`RSA PRIVATE KEY`), which WebCrypto doesn't import, so that DER is wrapped
  * in a PKCS#8 PrivateKeyInfo here: SEQUENCE { INTEGER 0, the rsaEncryption algorithm, OCTET
- * STRING <the PKCS#1 key> }. A PKCS#8 key passes through; an encrypted key doesn't.
+ * STRING <the PKCS#1 key> }. A PKCS#8 key passes through, whatever its line breaks (jose drops
+ * the whitespace itself); an encrypted key doesn't.
  */
 function pkcs8Pem(pem: string): string | null {
   const match = PEM.exec(pem);
@@ -516,7 +546,12 @@ export function createGitHub(
   const ownerEmail = ownerEmailOf(env);
   if (!ownerEmail) throw misconfigured("OWNER_EMAIL");
   const author = parseAuthor(env.GIT_AUTHOR, ownerEmail);
-  if (!author) throw misconfigured("GIT_AUTHOR");
+  if (!author) {
+    throw misconfigured(
+      "GIT_AUTHOR",
+      'GIT_AUTHOR must be "Name <id+login@users.noreply.github.com>" and never the owner\'s address.',
+    );
+  }
 
   let base = API_BASE;
   let stub = false;
@@ -528,7 +563,7 @@ export function createGitHub(
       throw new GitHubUnavailable("github_unavailable");
     }
     const local = localBase(override);
-    if (!local) throw misconfigured("GITHUB_API_BASE");
+    if (!local) throw misconfigured("GITHUB_API_BASE", "GITHUB_API_BASE isn't a local origin.");
     base = local;
     stub = true;
   }
@@ -544,7 +579,12 @@ export function createGitHub(
   // `.dev.vars` holds the key on one line with literal \n sequences; a paste may carry CRLF.
   const pem =
     env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n").replace(/\r\n?/g, "\n").trim() ?? "";
-  if (!/^\d+$/.test(installationId)) throw misconfigured("GITHUB_APP_INSTALLATION_ID");
+  if (!/^\d+$/.test(installationId)) {
+    throw misconfigured(
+      "GITHUB_APP_INSTALLATION_ID",
+      "GITHUB_APP_INSTALLATION_ID must be the installation's number (the end of its settings URL).",
+    );
+  }
   if (!clientId) throw misconfigured("GITHUB_APP_CLIENT_ID");
   if (!pem) throw misconfigured("GITHUB_APP_PRIVATE_KEY");
 
@@ -559,12 +599,12 @@ export function createGitHub(
     const cached = signingKeys.get(pem);
     if (cached) return cached;
     const pkcs8 = pkcs8Pem(pem);
-    if (!pkcs8) throw misconfigured("GITHUB_APP_PRIVATE_KEY");
+    if (!pkcs8) throw misconfigured("GITHUB_APP_PRIVATE_KEY", unusableKey(pem));
     let key: CryptoKey;
     try {
       key = await importPKCS8(pkcs8, "RS256");
     } catch {
-      throw misconfigured("GITHUB_APP_PRIVATE_KEY");
+      throw misconfigured("GITHUB_APP_PRIVATE_KEY", unusableKey(pem));
     }
     signingKeys.set(pem, key);
     return key;
@@ -641,7 +681,12 @@ export function createGitHub(
     );
     if ([401, 403, 404, 422].includes(answer.status)) {
       console.error("Publishing is misconfigured: the App's token request was refused");
-      throw new GitHubUnavailable("misconfigured");
+      throw new GitHubUnavailable(
+        "misconfigured",
+        "GitHub refused the App's token request: check GITHUB_APP_PRIVATE_KEY, " +
+          "GITHUB_APP_CLIENT_ID and GITHUB_APP_INSTALLATION_ID, and that the App is installed " +
+          "on personal-website with the permissions publishing needs.",
+      );
     }
     if (answer.status < 200 || answer.status >= 300)
       throw new GitHubError(answer.status, operation);
@@ -677,7 +722,12 @@ export function createGitHub(
     }
     if (problems.length > 0) {
       console.error("Publishing is misconfigured: the App's token grants", problems.join(", "));
-      throw new GitHubUnavailable("misconfigured");
+      throw new GitHubUnavailable(
+        "misconfigured",
+        `The App's token grants more than publishing may use (${problems.join(", ")}): install ` +
+          "it on personal-website only, with exactly Contents and Pull requests write and " +
+          "Actions and Checks read.",
+      );
     }
     tokens.set(cacheKey, { token, expiresAt });
     return token;

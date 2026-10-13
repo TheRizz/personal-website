@@ -143,7 +143,10 @@ describe("configuration, checked before any request", () => {
   it.each([{ OWNER_EMAIL: "" }, { OWNER_EMAIL: "   " }, { OWNER_EMAIL: undefined }])(
     "refuses an empty OWNER_EMAIL %j",
     async (extra) => {
-      expect(await refused(extra)).toMatchObject({ code: "misconfigured" });
+      expect(await refused(extra)).toMatchObject({
+        code: "misconfigured",
+        detail: "OWNER_EMAIL isn't set.",
+      });
     },
   );
 
@@ -152,8 +155,13 @@ describe("configuration, checked before any request", () => {
     "TheRizz",
     "owner@example.com <19941577+TheRizz@users.noreply.github.com>",
     "TheRizz <owner@example.com>",
-  ])("refuses GIT_AUTHOR %j", async (author) => {
-    expect(await refused({ GIT_AUTHOR: author })).toMatchObject({ code: "misconfigured" });
+  ])("refuses GIT_AUTHOR %j, naming the setting only", async (author) => {
+    const error = await refused({ GIT_AUTHOR: author });
+    expect(error).toMatchObject({
+      code: "misconfigured",
+      detail: expect.stringMatching(/^GIT_AUTHOR must be /),
+    });
+    expect(error.detail).not.toContain("example.com");
   });
 
   it("refuses a GIT_AUTHOR equal to the owner's address", async () => {
@@ -162,7 +170,10 @@ describe("configuration, checked before any request", () => {
       OWNER_EMAIL: owner.toUpperCase(),
       GIT_AUTHOR: "TheRizz <19941577+TheRizz@users.noreply.github.com>",
     });
-    expect(error).toMatchObject({ code: "misconfigured" });
+    expect(error).toMatchObject({
+      code: "misconfigured",
+      detail: expect.stringMatching(/^GIT_AUTHOR must be /),
+    });
   });
 
   it("refuses GITHUB_API_BASE on the real host, with an alert", async () => {
@@ -184,7 +195,10 @@ describe("configuration, checked before any request", () => {
     "not a url",
   ])("refuses the stub base %j even on localhost", async (base) => {
     const error = await refused({ GITHUB_API_BASE: base }, LOCAL);
-    expect(error).toMatchObject({ code: "misconfigured" });
+    expect(error).toMatchObject({
+      code: "misconfigured",
+      detail: "GITHUB_API_BASE isn't a local origin.",
+    });
   });
 
   it("refuses the e2e test key without the stub", async () => {
@@ -195,13 +209,16 @@ describe("configuration, checked before any request", () => {
     );
   });
 
+  const INSTALLATION_ID_HINT =
+    "GITHUB_APP_INSTALLATION_ID must be the installation's number (the end of its settings URL).";
+
   it.each([
-    { GITHUB_APP_INSTALLATION_ID: "12x" },
-    { GITHUB_APP_INSTALLATION_ID: undefined },
-    { GITHUB_APP_CLIENT_ID: " " },
-    { GITHUB_APP_PRIVATE_KEY: undefined },
-  ])("refuses missing secrets %j, logging only the name", async (extra) => {
-    expect(await refused(extra)).toMatchObject({ code: "misconfigured" });
+    [{ GITHUB_APP_INSTALLATION_ID: "12x" }, INSTALLATION_ID_HINT],
+    [{ GITHUB_APP_INSTALLATION_ID: undefined }, INSTALLATION_ID_HINT],
+    [{ GITHUB_APP_CLIENT_ID: " " }, "GITHUB_APP_CLIENT_ID isn't set."],
+    [{ GITHUB_APP_PRIVATE_KEY: undefined }, "GITHUB_APP_PRIVATE_KEY isn't set."],
+  ])("refuses missing secrets %j, logging and naming only the setting", async (extra, detail) => {
+    expect(await refused(extra)).toMatchObject({ code: "misconfigured", detail });
     const logged = vi.mocked(console.error).mock.calls.flat().join(" ");
     expect(logged).toMatch(/GITHUB_APP_/);
     expect(logged).not.toContain("PRIVATE KEY-----");
@@ -209,26 +226,60 @@ describe("configuration, checked before any request", () => {
 
   /** The base64 between a PEM's BEGIN and END lines, whitespace dropped. */
   const bodyOf = (key: string) => key.replace(/-----[A-Z ]+-----/g, "").replace(/\s/g, "");
+  /** The owner's hint for an unusable key: the value's shape (size, lines, header lines), never its text. */
+  const unusableKey = (key: string, headers: string) => {
+    const text = key.trim();
+    const lines = text.split("\n").length;
+    return (
+      `GITHUB_APP_PRIVATE_KEY isn't a usable private key (${text.length} characters on ${lines} ` +
+      `line${lines === 1 ? "" : "s"}, ${headers}); store the .pem exactly as downloaded.`
+    );
+  };
 
   it.each([
-    ["an encrypted key", () => encrypted],
-    ["a PKCS#8 key without its END line", () => "-----BEGIN PRIVATE KEY-----\nnope"],
-    ["a PKCS#1 key with its END line changed", () => pkcs1.replace("END RSA", "END")],
-    ["a PKCS#1 key that isn't base64", () => pkcs1.replace(/\n[^-]/, "\n*")],
-    ["a PKCS#1 key with a character missing", () => pkcs1.replace(/\n[^-]/, "\n")],
-    ["an EC key", () => pkcs1.replace(/RSA PRIVATE/g, "EC PRIVATE")],
-    ["text that isn't a key", () => "not a key"],
-  ])("refuses %s when it first signs, logging only the setting's name", async (_name, key) => {
-    const github = client({ GITHUB_APP_PRIVATE_KEY: key() });
-    expect(await failure(() => github.getRef("main"))).toMatchObject({ code: "misconfigured" });
-    expect(fake.requests).toEqual([]);
-    expect(vi.mocked(console.error).mock.calls).toEqual([
-      ["Publishing is misconfigured:", "GITHUB_APP_PRIVATE_KEY"],
-    ]);
-    const logged = vi.mocked(console.error).mock.calls.flat().join(" ");
-    expect(logged).not.toContain("PRIVATE KEY");
-    expect(logged).not.toContain(bodyOf(key()).slice(0, 24));
-  });
+    ["an encrypted key", () => encrypted, "BEGIN ENCRYPTED PRIVATE KEY, END ENCRYPTED PRIVATE KEY"],
+    [
+      "a PKCS#8 key without its END line",
+      () => "-----BEGIN PRIVATE KEY-----\nnope",
+      "BEGIN PRIVATE KEY, no END line",
+    ],
+    [
+      "a PKCS#1 key with its END line changed",
+      () => pkcs1.replace("END RSA", "END"),
+      "BEGIN RSA PRIVATE KEY, END PRIVATE KEY",
+    ],
+    [
+      "a PKCS#1 key that isn't base64",
+      () => pkcs1.replace(/\n[^-]/, "\n*"),
+      "BEGIN RSA PRIVATE KEY, END RSA PRIVATE KEY",
+    ],
+    [
+      "a PKCS#1 key with a character missing",
+      () => pkcs1.replace(/\n[^-]/, "\n"),
+      "BEGIN RSA PRIVATE KEY, END RSA PRIVATE KEY",
+    ],
+    [
+      "an EC key",
+      () => pkcs1.replace(/RSA PRIVATE/g, "EC PRIVATE"),
+      "BEGIN EC PRIVATE KEY, END EC PRIVATE KEY",
+    ],
+    ["text that isn't a key", () => "not a key", "no BEGIN line, no END line"],
+  ])(
+    "refuses %s when it first signs, logging only the setting's name",
+    async (_name, key, headers) => {
+      const github = client({ GITHUB_APP_PRIVATE_KEY: key() });
+      const error = await failure(() => github.getRef("main"));
+      expect(error).toMatchObject({ code: "misconfigured", detail: unusableKey(key(), headers) });
+      expect((error as GitHubUnavailable).detail).not.toContain(bodyOf(key()).slice(0, 24));
+      expect(fake.requests).toEqual([]);
+      expect(vi.mocked(console.error).mock.calls).toEqual([
+        ["Publishing is misconfigured:", "GITHUB_APP_PRIVATE_KEY"],
+      ]);
+      const logged = vi.mocked(console.error).mock.calls.flat().join(" ");
+      expect(logged).not.toContain("PRIVATE KEY");
+      expect(logged).not.toContain(bodyOf(key()).slice(0, 24));
+    },
+  );
 
   it("reads a key written on one line with literal \\n, as .dev.vars holds it", async () => {
     const github = client({ GITHUB_APP_PRIVATE_KEY: pem.replace(/\n/g, "\\n") });
@@ -242,7 +293,10 @@ describe("configuration, checked before any request", () => {
     ["PKCS#1 with whitespace around it", () => `\n  ${pkcs1}  \n`],
     ["PKCS#1 with spaces after its BEGIN line", () => pkcs1.replace("-----\n", "-----  \n")],
     ["PKCS#1 with its END line indented", () => pkcs1.replace("\n-----END", "\n  -----END")],
+    ["PKCS#1 on one line (no line breaks)", () => pkcs1.replace(/\n/g, "")],
+    ["PKCS#1 with spaces instead of line breaks", () => pkcs1.replace(/\n/g, " ")],
     ["PKCS#8", () => pem],
+    ["PKCS#8 on one line", () => pem.replace(/\n/g, "")],
   ])("signs the App JWT with the key stored as %s", async (_name, key) => {
     const github = client({ GITHUB_APP_PRIVATE_KEY: key() });
     // The fake answers the mint only after verifying the JWT with the public key.
@@ -321,16 +375,29 @@ describe("the App JWT and the installation token", () => {
   });
 
   it.each([
-    ["repository_selection all", { repository_selection: "all" }],
-    ["an extra workflows permission", { permissions: { contents: "write", workflows: "write" } }],
-    ["an admin level", { permissions: { contents: "admin" } }],
-    ["write where read was asked", { permissions: { checks: "write" } }],
-    ["two repositories", { repositories: [{ name: "personal-website" }, { name: "other" }] }],
-    ["another repository", { repositories: [{ name: "other" }] }],
-  ])("fails closed on a token with %s", async (_name, change) => {
+    ["repository_selection all", { repository_selection: "all" }, "repository_selection"],
+    [
+      "an extra workflows permission",
+      { permissions: { contents: "write", workflows: "write" } },
+      "permissions.workflows",
+    ],
+    ["an admin level", { permissions: { contents: "admin" } }, "permissions.contents"],
+    ["write where read was asked", { permissions: { checks: "write" } }, "permissions.checks"],
+    [
+      "two repositories",
+      { repositories: [{ name: "personal-website" }, { name: "other" }] },
+      "repositories",
+    ],
+    ["another repository", { repositories: [{ name: "other" }] }, "repositories"],
+  ])("fails closed on a token with %s, naming the problem", async (_name, change, problem) => {
     fake.grant = (grant) => ({ ...grant, ...change });
     const error = await failure(() => client().getRef("main"));
-    expect(error).toMatchObject({ code: "misconfigured" });
+    expect(error).toMatchObject({
+      code: "misconfigured",
+      detail: expect.stringContaining(
+        `publishing may use (${problem}): install it on personal-website only, with exactly`,
+      ),
+    });
     expect(routes()).toEqual(["POST /app/installations/:id/access_tokens"]);
   });
 
@@ -399,7 +466,13 @@ describe("the App JWT and the installation token", () => {
 
   it.each([401, 403, 404, 422])("treats a %i from the mint as misconfiguration", async (status) => {
     fake.override("POST", "/app/installations/:id/access_tokens", new Response("{}", { status }));
-    expect(await failure(() => client().getRef("main"))).toMatchObject({ code: "misconfigured" });
+    expect(await failure(() => client().getRef("main"))).toMatchObject({
+      code: "misconfigured",
+      detail:
+        "GitHub refused the App's token request: check GITHUB_APP_PRIVATE_KEY, " +
+        "GITHUB_APP_CLIENT_ID and GITHUB_APP_INSTALLATION_ID, and that the App is installed " +
+        "on personal-website with the permissions publishing needs.",
+    });
   });
 
   it("treats a redirect as an error and never follows it", async () => {

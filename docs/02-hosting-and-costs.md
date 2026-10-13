@@ -156,7 +156,7 @@ check you can run to confirm it worked.
    - **Settings → Secrets and variables → Actions → Variables → New repository variable** `PUBLISH_BOT` = the bot login, for example `ry-mart-publisher[bot]`. The guards in `ci.yml` and `deploy.yml` (Step 10.8) use it to recognise the App, and `deploy.yml` refuses to deploy once the Worker has the App's key but this variable is missing. It isn't secret.
    - Never add the App as a bypass actor in any ruleset.
 5. Store the key as downloaded. The Worker reads GitHub's `.pem` as it is (PKCS#1, `BEGIN RSA PRIVATE KEY`) and a PKCS#8 one too, so there is nothing to convert. Keep the downloaded `.pem` **outside the repo** (for example `~/keys/`) and never copy it into the working tree; the repo is public. Either way works, and the first works from a phone with only the downloaded file:
-   - **Dashboard:** Workers & Pages → the site's Worker → **Settings → Variables and Secrets → Add**. Type **Secret**, name `GITHUB_APP_PRIVATE_KEY`, and paste the whole file as the value, `-----BEGIN` and `-----END` lines included. Add `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_INSTALLATION_ID` the same way.
+   - **Dashboard:** Workers & Pages → the site's Worker → **Settings → Variables and Secrets → Add**. Type **Secret**, name `GITHUB_APP_PRIVATE_KEY`, and paste the whole file as the value, `-----BEGIN` and `-----END` lines included. On a phone, open the file and use **Select All** before copying: a dragged selection can miss the first or last line, and the Worker then refuses the key (lost line breaks don't matter; a lost line does). Add `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_INSTALLATION_ID` the same way.
    - **Terminal:**
      ```sh
      cd apps/web
@@ -164,7 +164,7 @@ check you can run to confirm it worked.
      pnpm wrangler secret put GITHUB_APP_CLIENT_ID
      pnpm wrangler secret put GITHUB_APP_INSTALLATION_ID
      ```
-   Keep the `.pem` (on the phone or in `~/keys/`) until check 11 passes (after Step 10.8; that check needs a computer), then delete it. `.gitignore` ignores `*.pem` and `*.key` as a backstop.
+   Keep the `.pem` (on the phone or in `~/keys/`) until check 11 passes (after Step 10.8; that check needs a computer), then delete it. `.gitignore` ignores `*.pem` and `*.key` as a backstop. If **Publish** then answers "Publishing isn't set up: …", that message names the setting or App permission to fix (never a value), and the Worker's logs (dashboard → Workers & Pages → the site's Worker → **Logs**) record the same cause as `Publishing is misconfigured: …`.
 6. ✅ Check: `gh api repos/TheRizz/personal-website --jq '{allow_auto_merge, delete_branch_on_merge}'` shows `false` and `true`.
 7. ✅ Check: `gh api repos/TheRizz/personal-website/rulesets --jq '.[] | {id, name}'` lists both rulesets (the list has no rules). For each id, `gh api repos/TheRizz/personal-website/rulesets/<id> --jq '{rules, bypass_actors}'`: `main` has a `required_status_checks` rule with `ci`, `required_approving_review_count: 0` and no `update` rule, and neither lists the publishing App as a bypass actor.
 8. ✅ Check: on a throwaway PR, merging is blocked while `ci` runs. Once it passes, **Squash and merge** works by hand with no approval and no bypass, and the head branch is deleted.

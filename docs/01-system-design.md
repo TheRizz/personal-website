@@ -557,8 +557,9 @@ fields beside `error` (`{"error": {"code", "message"}, "rev": 3}`) and send `Cac
 no-store` on every answer. Every publishing route can also answer `502 github_error` (GitHub
 didn't answer, or answered something unexpected), `503 github_unavailable` (the App lost access
 to the repository, `GITHUB_API_BASE` on a real host, or the e2e test key without the stub) or
-`503 misconfigured` (a missing or wrong secret, `GIT_AUTHOR` or token grant), and `500
-internal_error`. The POST bodies are strict: an unknown key is `400 bad_request`.
+`503 misconfigured` (a missing or wrong secret, `GIT_AUTHOR` or token grant; its message names
+the setting or permission to fix, never a value), and `500 internal_error`. The POST bodies are
+strict: an unknown key is `400 bad_request`.
 
 #### 4.9.3 Editor
 
