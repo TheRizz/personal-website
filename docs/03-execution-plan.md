@@ -429,7 +429,7 @@ one-click publishing.
 ### Step 10.7: Owner setup, part 2: repo settings and GitHub App (no code)
 - [ ] Hosting guide §2.10: fix the `main` ruleset to match §2.4 (0 approvals, which the owner sets, required `ci`, Restrict updates off). Turn on Automatically delete head branches and leave Allow auto-merge off. From now on your own PRs merge by hand without the admin bypass once `ci` passes.
 - [ ] Add the "bot scope" ruleset: restrict creations and updates on every branch except `main` and `blog/**`, with the Admin role, Dependabot and the Claude GitHub App as bypass actors.
-- [ ] Create the GitHub App (Contents RW, Pull requests RW, Actions R, Checks R, no Workflows, no webhook), install it on this repo only, pipe the key through the PKCS#8 conversion into the Worker secret (the `.pem` stays outside the repo) and set the three `GITHUB_APP_*` Worker secrets. Never add the App as a bypass actor.
+- [ ] Create the GitHub App (Contents RW, Pull requests RW, Actions R, Checks R, no Workflows, no webhook), install it on this repo only, store the downloaded key as the Worker secret as it is, pasted in the dashboard or piped into `wrangler secret put` (the `.pem` stays outside the repo), and set the other two `GITHUB_APP_*` Worker secrets. Never add the App as a bypass actor.
 
 **Done when:** every ✅ check in §2.10 up to check 10 passes. A throwaway PR can't be merged while `ci` runs and merges by hand once it passes, with no approval and no bypass. A local `test/x` push and a Claude Code `claude/test` push both still work.
 
@@ -487,7 +487,10 @@ one-click publishing.
 > under `ctx.waitUntil`, and a first publish or an unpublish that fails after creating its branch
 > closes the PR and deletes the branch. Publishing refuses to run when the e2e test key is set
 > without the local GitHub stub. `pnpm e2e:keys` now also writes the stub's `GITHUB_API_BASE` and
-> a throwaway test App, private key included, to `.dev.vars`.
+> a throwaway test App, private key included, to `.dev.vars`. Added 2026-10-13: the Worker
+> accepts the App key as GitHub downloads it (PKCS#1) as well as PKCS#8, wrapping the former in
+> PKCS#8 itself, so the secret can be pasted into the dashboard from a phone with no `openssl`
+> step (hosting guide §2.10 step 5).
 
 ### Step 10.10: Publish status, cancel and unpublish
 - [x] `GET …/status` (one GraphQL PR query, the deploy run for the merge SHA, `/api/health`) and the timeline in the editor: PR opened → CI running → waiting for your review → merged → deploying → Live, with links. A PR closed without a merge puts the draft back to Draft.
