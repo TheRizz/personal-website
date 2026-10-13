@@ -124,6 +124,7 @@ from the nav yet.
 
 ### Step 3.3: Sitemap and RSS ⇄
 - [ ] Generate `sitemap.xml` (all prerendered routes) and `rss.xml` (latest 20 posts) during the content build.
+- [ ] Write both into the build's output directory (`apps/web/app/generated/`, or `--out`) and serve them from there, never straight into `apps/web/public/`: the draft privacy test (Step 10.11) reads only what the build writes under `--out`.
 
 **Done when:** both files pass validators and are linked from `robots.txt` and the `<head>`.
 
@@ -181,6 +182,7 @@ from the nav yet.
 ### Step 6.2: Search index build
 - [ ] Extend `build-content` to make a unified document list and a serialized MiniSearch index with the boosts, fuzzy and prefix settings from §4.4.
 - [ ] Content-hashed file name. CI fails if the gzipped index is over 300 KB.
+- [ ] Write the index into the build's output directory (`--out`), like every other build output, so the draft privacy test (Step 10.11) reads it.
 
 **Done when:** a unit test loads the index and finds documents by a title typo, by tag and by type filter.
 
@@ -510,10 +512,32 @@ one-click publishing.
 > and leaves the post's images in R2 (hosting guide §6).
 
 ### Step 10.11: Hardening
-- [ ] Draft privacy fixture test: a seeded draft's text and image keys never appear in `posts.json`, RSS, the sitemap, the search index or a PR body.
+- [x] Draft privacy fixture test: a seeded draft's text and image keys never appear in `posts.json`, RSS, the sitemap, the search index or a PR body.
 - [ ] Runbook drills (hosting guide §6): revoke Access sessions, restore a draft from a revision, from Time Travel and from a `blog-backups` export, rotate the App key, emergency takedown with a WAF rule.
 
 **Done when:** the authoring checks in the go-live checklist (hosting guide §5) pass on production, each drill has been done once, and the Lighthouse and axe budgets still pass.
+
+> **Built 2026-10-13 (Step 10.11, code only).** `worker/draft-privacy.test.ts` seeds a private draft
+> (a marker in every field and in a figure's caption and alt, two image rows, a manual and a
+> conflict revision) and an unpublished edit of a post on `main`. It then takes another draft
+> through the admin router from a revision with a section that is removed before publishing, a
+> publish that fails once after its branch is pushed (so the clean-up runs), a republish, CI and the
+> fake's merge to Live. The private markers, image ids and every draft id must be missing from every
+> GitHub request (URL, headers and body; PR title, body and comments included) and from the PRs and
+> commits the fake keeps; from every file the content build writes from the merged `main` plus a
+> `draft: true` post, and what the build prints; and from everything logged during the flow (each
+> argument inspected in full, so an error's cause or a Request's URL can't hide), where the
+> published post's text and image and the owner's address are refused too. The `draft: true` post's
+> slug, tag, text and image are single-word markers, so a sitemap that listed it or a search index
+> that split its words would show one. The build check reads the whole output directory, so the RSS
+> feed, the sitemap and the search index are covered once Steps 3.3 and 6.2 add them, as long as
+> they write there (now on those steps' checklists). For that `scripts/build-content.ts` takes
+> `--content` and `--out`, and it now refuses unknown flags. Each check was seen to fail against a
+> planted leak: a build that keeps drafts in `posts.json`, a sitemap, a tag list or a search index,
+> a feed file with every title, a republish comment diffed against an older revision, another
+> draft's title in a PR body, a request header carrying the request URL, a logged draft body, a
+> `console.dir` of the draft's row and a branch name logged during clean-up. The runbook drills and
+> the go-live authoring checks are the owner's, on production, after Step 10.7.
 
 ---
 
