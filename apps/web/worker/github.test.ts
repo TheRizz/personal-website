@@ -29,8 +29,23 @@ const POST = "content/blog/2026-10-11-hello-world.md";
 const SHA = "a".repeat(40);
 const T0 = Date.UTC(2026, 9, 13, 12, 0, 0);
 
+/** The part of node:crypto the fixtures use; the Worker's tsconfig has no Node types. */
+interface CryptoModule {
+  createPrivateKey(pem: string): {
+    export(options: {
+      type: "pkcs1" | "pkcs8";
+      format: "pem";
+      cipher?: string;
+      passphrase?: string;
+    }): string;
+  };
+}
+
 let publicKey: CryptoKey;
 let pem: string;
+/** The same key as GitHub downloads it (PKCS#1), and encrypted with a throwaway passphrase. */
+let pkcs1: string;
+let encrypted: string;
 let fake: GitHubFake;
 let clock: number;
 const now = () => clock;
@@ -39,6 +54,14 @@ beforeAll(async () => {
   const pair = await generateKeyPair("RS256", { extractable: true });
   publicKey = pair.publicKey;
   pem = await exportPKCS8(pair.privateKey);
+  const { createPrivateKey } = (await import("node:crypto" as string)) as CryptoModule;
+  pkcs1 = createPrivateKey(pem).export({ type: "pkcs1", format: "pem" });
+  encrypted = createPrivateKey(pem).export({
+    type: "pkcs8",
+    format: "pem",
+    cipher: "aes-256-cbc",
+    passphrase: "throwaway",
+  });
 });
 
 beforeEach(async () => {
@@ -184,15 +207,50 @@ describe("configuration, checked before any request", () => {
     expect(logged).not.toContain("PRIVATE KEY-----");
   });
 
-  it("refuses a key that isn't PKCS#8 when it first signs", async () => {
-    const github = client({ GITHUB_APP_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----\nnope" });
+  /** The base64 between a PEM's BEGIN and END lines, whitespace dropped. */
+  const bodyOf = (key: string) => key.replace(/-----[A-Z ]+-----/g, "").replace(/\s/g, "");
+
+  it.each([
+    ["an encrypted key", () => encrypted],
+    ["a PKCS#8 key without its END line", () => "-----BEGIN PRIVATE KEY-----\nnope"],
+    ["a PKCS#1 key with its END line changed", () => pkcs1.replace("END RSA", "END")],
+    ["a PKCS#1 key that isn't base64", () => pkcs1.replace(/\n[^-]/, "\n*")],
+    ["a PKCS#1 key with a character missing", () => pkcs1.replace(/\n[^-]/, "\n")],
+    ["an EC key", () => pkcs1.replace(/RSA PRIVATE/g, "EC PRIVATE")],
+    ["text that isn't a key", () => "not a key"],
+  ])("refuses %s when it first signs, logging only the setting's name", async (_name, key) => {
+    const github = client({ GITHUB_APP_PRIVATE_KEY: key() });
     expect(await failure(() => github.getRef("main"))).toMatchObject({ code: "misconfigured" });
     expect(fake.requests).toEqual([]);
+    expect(vi.mocked(console.error).mock.calls).toEqual([
+      ["Publishing is misconfigured:", "GITHUB_APP_PRIVATE_KEY"],
+    ]);
+    const logged = vi.mocked(console.error).mock.calls.flat().join(" ");
+    expect(logged).not.toContain("PRIVATE KEY");
+    expect(logged).not.toContain(bodyOf(key()).slice(0, 24));
   });
 
   it("reads a key written on one line with literal \\n, as .dev.vars holds it", async () => {
     const github = client({ GITHUB_APP_PRIVATE_KEY: pem.replace(/\n/g, "\\n") });
     expect(await github.getRef("main")).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it.each([
+    ["PKCS#1, as GitHub downloads it", () => pkcs1],
+    ["PKCS#1 with CRLF line endings", () => pkcs1.replace(/\n/g, "\r\n")],
+    ["PKCS#1 on one line with literal \\n", () => pkcs1.replace(/\n/g, "\\n")],
+    ["PKCS#1 with whitespace around it", () => `\n  ${pkcs1}  \n`],
+    ["PKCS#1 with spaces after its BEGIN line", () => pkcs1.replace("-----\n", "-----  \n")],
+    ["PKCS#1 with its END line indented", () => pkcs1.replace("\n-----END", "\n  -----END")],
+    ["PKCS#8", () => pem],
+  ])("signs the App JWT with the key stored as %s", async (_name, key) => {
+    const github = client({ GITHUB_APP_PRIVATE_KEY: key() });
+    // The fake answers the mint only after verifying the JWT with the public key.
+    expect(await github.getRef("main")).toMatch(/^[0-9a-f]{40}$/);
+    const jwt = fake.requests[0]!.headers.authorization!.replace(/^Bearer /, "");
+    const { payload } = await jwtVerify(jwt, publicKey, { currentDate: new Date(T0) });
+    expect(payload.iss).toBe(FAKE_CLIENT_ID);
+    expect(console.error).not.toHaveBeenCalled();
   });
 
   it("uses the local stub on localhost, and reads its live version", async () => {

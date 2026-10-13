@@ -155,14 +155,16 @@ check you can run to confirm it worked.
    - Note the **Client ID**, the **installation ID** (the number at the end of the installation's settings URL) and the bot login, `<app-slug>[bot]`.
    - **Settings → Secrets and variables → Actions → Variables → New repository variable** `PUBLISH_BOT` = the bot login, for example `ry-mart-publisher[bot]`. The guards in `ci.yml` and `deploy.yml` (Step 10.8) use it to recognise the App, and `deploy.yml` refuses to deploy once the Worker has the App's key but this variable is missing. It isn't secret.
    - Never add the App as a bypass actor in any ruleset.
-5. Convert and store the key. Keep the downloaded `.pem` **outside the repo** (for example `~/keys/`) and never copy it into the working tree; the repo is public. The conversion is piped, so no converted file is written:
-   ```sh
-   cd apps/web
-   openssl pkcs8 -topk8 -nocrypt -in ~/keys/<app>.pem | pnpm wrangler secret put GITHUB_APP_PRIVATE_KEY
-   pnpm wrangler secret put GITHUB_APP_CLIENT_ID
-   pnpm wrangler secret put GITHUB_APP_INSTALLATION_ID
-   ```
-   Keep `~/keys/<app>.pem` until check 11 passes (after Step 10.8), then delete it. `.gitignore` ignores `*.pem` and `*.key` as a backstop.
+5. Store the key as downloaded. The Worker reads GitHub's `.pem` as it is (PKCS#1, `BEGIN RSA PRIVATE KEY`) and a PKCS#8 one too, so there is nothing to convert. Keep the downloaded `.pem` **outside the repo** (for example `~/keys/`) and never copy it into the working tree; the repo is public. Either way works, and the first works from a phone with only the downloaded file:
+   - **Dashboard:** Workers & Pages → the site's Worker → **Settings → Variables and Secrets → Add**. Type **Secret**, name `GITHUB_APP_PRIVATE_KEY`, and paste the whole file as the value, `-----BEGIN` and `-----END` lines included. Add `GITHUB_APP_CLIENT_ID` and `GITHUB_APP_INSTALLATION_ID` the same way.
+   - **Terminal:**
+     ```sh
+     cd apps/web
+     pnpm wrangler secret put GITHUB_APP_PRIVATE_KEY < ~/keys/<app>.pem
+     pnpm wrangler secret put GITHUB_APP_CLIENT_ID
+     pnpm wrangler secret put GITHUB_APP_INSTALLATION_ID
+     ```
+   Keep the `.pem` (on the phone or in `~/keys/`) until check 11 passes (after Step 10.8; that check needs a computer), then delete it. `.gitignore` ignores `*.pem` and `*.key` as a backstop.
 6. ✅ Check: `gh api repos/TheRizz/personal-website --jq '{allow_auto_merge, delete_branch_on_merge}'` shows `false` and `true`.
 7. ✅ Check: `gh api repos/TheRizz/personal-website/rulesets --jq '.[] | {id, name}'` lists both rulesets (the list has no rules). For each id, `gh api repos/TheRizz/personal-website/rulesets/<id> --jq '{rules, bypass_actors}'`: `main` has a `required_status_checks` rule with `ci`, `required_approving_review_count: 0` and no `update` rule, and neither lists the publishing App as a bypass actor.
 8. ✅ Check: on a throwaway PR, merging is blocked while `ci` runs. Once it passes, **Squash and merge** works by hand with no approval and no bypass, and the head branch is deleted.
@@ -295,7 +297,7 @@ infrastructure change.
 | Status stays at "PR opened" while the PR shows `ci` | The status reads `ci` from GitHub Actions' check suite, filtered by its App id 15368 (`worker/github.ts`). Verify it at the Step 10.9 production check: `gh api repos/TheRizz/personal-website/commits/<head sha>/check-suites --jq '.check_suites[] \| {id: .app.id, slug: .app.slug}'` should list `15368` with slug `github-actions`. If it doesn't, drop the `appId` filter and keep the slug check. |
 | Restore a draft | Revisions drawer → **Restore**. Older or deleted: `pnpm wrangler d1 time-travel restore blog --timestamp=<ISO time>` (last 7 days, rewinds the whole database, so export first). Older still: download the export from `blog-backups`, load it into a scratch database with `wrangler d1 execute <scratch> --file=<export>.sql` and copy the row back. |
 | Revoke admin access | Sign out on one device: `https://ry-mart.com/cdn-cgi/access/logout`. Everywhere: **Zero Trust → Access controls → Applications → Site admin → Revoke existing tokens**. Access enforces both, and they cover every admin request because the Worker serves admin only on the paths Access matches. |
-| Rotate the GitHub App key | App settings → **Generate a private key**, saved outside the repo → `openssl pkcs8 -topk8 -nocrypt -in ~/keys/<app>.pem \| pnpm wrangler secret put GITHUB_APP_PRIVATE_KEY` → test a publish → delete the old key in the App settings and the local file |
+| Rotate the GitHub App key | App settings → **Generate a private key**, saved outside the repo → `pnpm wrangler secret put GITHUB_APP_PRIVATE_KEY < ~/keys/<app>.pem` from `apps/web`, or paste the file into the dashboard secret (§2.10 step 5) → test a publish → delete the old key in the App settings and the local file |
 | Add a snippet | Add `content/snippets/<slug>.md`, open a PR, merge |
 | Add photos | `pnpm photos:upload ./my-folder --album yosemite-2026 --tags hiking,landscape`. This resizes, uploads to R2 and adds to `photos.yaml`. Commit the manifest and open a PR. |
 | Update resume | Edit `content/resume.yaml` and merge. CI regenerates the PDF. |

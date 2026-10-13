@@ -1052,6 +1052,22 @@ describe("routing", () => {
     expect(fake.requests).toEqual([]);
   });
 
+  it.each([
+    ["an encrypted key", () => pem.replace(/PRIVATE KEY-----/g, "ENCRYPTED PRIVATE KEY-----")],
+    ["text that isn't a key", () => "not a key"],
+  ])("answers 503 for %s, logging only the setting's name", async (_name, key) => {
+    const id = newDraft();
+    env.GITHUB_APP_PRIVATE_KEY = key();
+    const { status, json } = await publish(id);
+    expect([status, json.error.code]).toEqual([503, "misconfigured"]);
+    expect(fake.requests).toEqual([]);
+    const calls = vi.mocked(console.error).mock.calls;
+    expect(calls).toContainEqual(["Publishing is misconfigured:", "GITHUB_APP_PRIVATE_KEY"]);
+    const logged = calls.flat().join(" ");
+    expect(logged).not.toContain("PRIVATE KEY");
+    expect(logged).not.toContain(pem.split("\n")[1]);
+  });
+
   it("answers 502 for a GitHub failure and logs only its kind", async () => {
     const id = newDraft();
     fake.override("GET", "/repos/:repo/git/commits/:sha", new Response("{}", { status: 500 }));

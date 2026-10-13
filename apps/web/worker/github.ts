@@ -14,7 +14,7 @@ declare const __APP_VERSION__: string | undefined;
 
 /** The bindings the client reads. The App's key, client id and installation id are secrets. */
 export interface GitHubEnv {
-  /** PKCS#8 PEM (hosting guide §2.10 step 5). */
+  /** The App's key PEM as GitHub downloads it (PKCS#1) or as PKCS#8 (hosting guide §2.10 step 5). */
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_CLIENT_ID?: string;
   GITHUB_APP_INSTALLATION_ID?: string;
@@ -301,6 +301,49 @@ function localBase(value: string): string | null {
   return ok ? url.origin : null;
 }
 
+/**
+ * A PEM with LF line endings and no surrounding whitespace: the label and the base64 body. A paste
+ * may leave spaces after the BEGIN line or indent the END line; both are allowed.
+ */
+const PEM = /^-----BEGIN ([A-Z ]+)-----[ \t]*\n([A-Za-z0-9+/=\s]+)\n[ \t]*-----END \1-----$/;
+/** DER for `INTEGER 0` and for `SEQUENCE { OID 1.2.840.113549.1.1.1 (rsaEncryption), NULL }`. */
+const DER_VERSION_0 = [0x02, 0x01, 0x00];
+const DER_RSA_ENCRYPTION = [
+  0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
+];
+
+/** A DER element: the tag, the length (one byte under 128, else a count then big-endian bytes). */
+function der(tag: number, body: ArrayLike<number>): number[] {
+  const length: number[] = [];
+  for (let rest = body.length; rest > 0; rest = Math.floor(rest / 256)) length.unshift(rest % 256);
+  const prefix = body.length < 0x80 ? [body.length] : [0x80 | length.length, ...length];
+  return [tag, ...prefix, ...Array.from(body)];
+}
+
+/**
+ * The App's key as a PKCS#8 PEM, or null unless `pem` is a plain private key. GitHub downloads
+ * App keys as PKCS#1 (`RSA PRIVATE KEY`), which WebCrypto doesn't import, so that DER is wrapped
+ * in a PKCS#8 PrivateKeyInfo here: SEQUENCE { INTEGER 0, the rsaEncryption algorithm, OCTET
+ * STRING <the PKCS#1 key> }. A PKCS#8 key passes through; an encrypted key doesn't.
+ */
+function pkcs8Pem(pem: string): string | null {
+  const match = PEM.exec(pem);
+  if (!match) return null;
+  const [, label, body] = match;
+  if (label === "PRIVATE KEY") return pem;
+  if (label !== "RSA PRIVATE KEY") return null;
+  let pkcs1: Uint8Array;
+  try {
+    pkcs1 = Uint8Array.from(atob(body!.replace(/\s/g, "")), (char) => char.charCodeAt(0));
+  } catch {
+    return null;
+  }
+  const info = der(0x30, [...DER_VERSION_0, ...DER_RSA_ENCRYPTION, ...der(0x04, pkcs1)]);
+  const base64 = btoa(info.map((byte) => String.fromCharCode(byte)).join(""));
+  const lines = base64.match(/.{1,64}/g) ?? [];
+  return `-----BEGIN PRIVATE KEY-----\n${lines.join("\n")}\n-----END PRIVATE KEY-----`;
+}
+
 // ---- Caches shared across requests: resolved values only, never a promise ----
 
 const tokens = new Map<string, { token: string; expiresAt: number }>();
@@ -498,8 +541,9 @@ export function createGitHub(
 
   const installationId = env.GITHUB_APP_INSTALLATION_ID?.trim() ?? "";
   const clientId = env.GITHUB_APP_CLIENT_ID?.trim() ?? "";
-  // `.dev.vars` holds the key on one line with literal \n sequences.
-  const pem = env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n").trim() ?? "";
+  // `.dev.vars` holds the key on one line with literal \n sequences; a paste may carry CRLF.
+  const pem =
+    env.GITHUB_APP_PRIVATE_KEY?.replace(/\\n/g, "\n").replace(/\r\n?/g, "\n").trim() ?? "";
   if (!/^\d+$/.test(installationId)) throw misconfigured("GITHUB_APP_INSTALLATION_ID");
   if (!clientId) throw misconfigured("GITHUB_APP_CLIENT_ID");
   if (!pem) throw misconfigured("GITHUB_APP_PRIVATE_KEY");
@@ -510,12 +554,15 @@ export function createGitHub(
   // This request's mint while it runs; other requests never wait on it.
   let minting: Promise<string> | null = null;
 
+  /** The key, imported once per key text; PKCS#1 is wrapped as PKCS#8 on the way in. */
   async function signingKey(): Promise<CryptoKey> {
     const cached = signingKeys.get(pem);
     if (cached) return cached;
+    const pkcs8 = pkcs8Pem(pem);
+    if (!pkcs8) throw misconfigured("GITHUB_APP_PRIVATE_KEY");
     let key: CryptoKey;
     try {
-      key = await importPKCS8(pem, "RS256");
+      key = await importPKCS8(pkcs8, "RS256");
     } catch {
       throw misconfigured("GITHUB_APP_PRIVATE_KEY");
     }
