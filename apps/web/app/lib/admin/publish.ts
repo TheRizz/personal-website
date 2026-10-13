@@ -268,8 +268,10 @@ export function describePublishError(error: unknown): ErrorText {
     case "github_error":
       return { text: "GitHub didn't answer as expected. Try again in a minute." };
     case "github_unavailable":
-    case "misconfigured":
       return { text: "Publishing isn't available right now." };
+    case "misconfigured":
+      // The Worker's message names the setting to fix ("Publishing isn't set up: …"), never a value.
+      return { text: error.message || "Publishing isn't available right now." };
     case "internal_error":
       return { text: "Something went wrong on the server. Try again." };
     default:

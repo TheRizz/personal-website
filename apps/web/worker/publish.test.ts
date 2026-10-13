@@ -1049,6 +1049,7 @@ describe("routing", () => {
     env.GITHUB_APP_PRIVATE_KEY = undefined;
     const { status, json } = await publish(id);
     expect([status, json.error.code]).toEqual([503, "misconfigured"]);
+    expect(json.error.message).toBe("Publishing isn't set up: GITHUB_APP_PRIVATE_KEY isn't set.");
     expect(fake.requests).toEqual([]);
   });
 
@@ -1060,6 +1061,11 @@ describe("routing", () => {
     env.GITHUB_APP_PRIVATE_KEY = key();
     const { status, json } = await publish(id);
     expect([status, json.error.code]).toEqual([503, "misconfigured"]);
+    // The answer names the setting and what to store there, never the key's text.
+    expect(json.error.message).toMatch(
+      /^Publishing isn't set up: GITHUB_APP_PRIVATE_KEY isn't a usable private key/,
+    );
+    expect(JSON.stringify(json)).not.toContain(pem.split("\n")[1]!.slice(0, 20));
     expect(fake.requests).toEqual([]);
     const calls = vi.mocked(console.error).mock.calls;
     expect(calls).toContainEqual(["Publishing is misconfigured:", "GITHUB_APP_PRIVATE_KEY"]);

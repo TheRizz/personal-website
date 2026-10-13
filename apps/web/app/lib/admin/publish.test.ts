@@ -229,11 +229,19 @@ describe("describePublishError", () => {
     expect(refusal("github_error", {}, 502).text).toBe(
       "GitHub didn't answer as expected. Try again in a minute.",
     );
-    for (const code of ["github_unavailable", "misconfigured"]) {
-      expect(refusal(code, {}, 503).text).toBe("Publishing isn't available right now.");
-    }
+    expect(refusal("github_unavailable", {}, 503).text).toBe(
+      "Publishing isn't available right now.",
+    );
     expect(refusal("owner_email").text).toBe(
       "This post contains your private e-mail address. Remove it and publish again.",
+    );
+  });
+
+  it("shows the setting a misconfiguration names, or the generic sentence without one", () => {
+    const named = "Publishing isn't set up: GITHUB_APP_PRIVATE_KEY isn't set.";
+    expect(describePublishError(new ApiError(503, "misconfigured", named)).text).toBe(named);
+    expect(describePublishError(new ApiError(503, "misconfigured", "")).text).toBe(
+      "Publishing isn't available right now.",
     );
   });
 

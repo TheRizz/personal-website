@@ -490,7 +490,10 @@ one-click publishing.
 > a throwaway test App, private key included, to `.dev.vars`. Added 2026-10-13: the Worker
 > accepts the App key as GitHub downloads it (PKCS#1) as well as PKCS#8, wrapping the former in
 > PKCS#8 itself, so the secret can be pasted into the dashboard from a phone with no `openssl`
-> step (hosting guide §2.10 step 5).
+> step (hosting guide §2.10 step 5). Also 2026-10-13: a `503 misconfigured` answer says which
+> setting or App permission to fix ("Publishing isn't set up: …", names only, never a value) and
+> the editor shows that line in place of the generic sentence; a key pasted without its line
+> breaks is accepted too.
 
 ### Step 10.10: Publish status, cancel and unpublish
 - [x] `GET …/status` (one GraphQL PR query, the deploy run for the merge SHA, `/api/health`) and the timeline in the editor: PR opened → CI running → waiting for your review → merged → deploying → Live, with links. A PR closed without a merge puts the draft back to Draft.
