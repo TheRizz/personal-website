@@ -1,15 +1,21 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { figureWidths, variantKey } from "@site/content-markdown/figure";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createD1 } from "./d1-fake";
 import { MAX_BODY_BYTES, REVISION_CAP, handleDrafts } from "./drafts";
+import { createR2, type StoredObject } from "./r2-fake";
 
-// The drafts API against a real SQLite database with the shipped migrations (d1-fake.ts).
+// The drafts API against a real SQLite database with the shipped migrations (d1-fake.ts), and an
+// in-memory R2 bucket for the images a discard deletes (r2-fake.ts).
 
 const SITE = "https://ry-mart.com";
 let db: D1Database;
 let sqlite: Awaited<ReturnType<typeof createD1>>["sqlite"];
+let photos: R2Bucket;
+let objects: Map<string, StoredObject>;
 
 beforeEach(async () => {
   ({ db, sqlite } = await createD1());
+  ({ bucket: photos, objects } = createR2());
 });
 
 async function call(method: string, path: string, body?: unknown) {
@@ -18,7 +24,7 @@ async function call(method: string, path: string, body?: unknown) {
     headers: body === undefined ? {} : { "Content-Type": "application/json" },
     body: body === undefined ? undefined : typeof body === "string" ? body : JSON.stringify(body),
   });
-  const response = await handleDrafts(request, db);
+  const response = await handleDrafts(request, { DB: db, PHOTOS: photos });
   if (!response) throw new Error(`no route for ${method} ${path}`);
   const text = await response.text();
   return { status: response.status, response, json: text ? JSON.parse(text) : undefined };
@@ -76,7 +82,7 @@ describe("create, list and load", () => {
   it("answers wrong methods with 405 and leaves other paths alone", async () => {
     expect((await call("PATCH", "")).status).toBe(405);
     const other = new Request(`${SITE}/api/admin/posts`);
-    expect(await handleDrafts(other, db)).toBeNull();
+    expect(await handleDrafts(other, { DB: db, PHOTOS: photos })).toBeNull();
   });
 });
 
@@ -246,5 +252,151 @@ describe("discard", () => {
     sqlite.prepare("UPDATE drafts SET status = 'publishing' WHERE id = ?").run(id);
     expect((await call("DELETE", `/${id}`)).status).toBe(409);
     expect((await call("GET", `/${id}`)).status).toBe(200);
+  });
+});
+
+describe("images", () => {
+  /** An uploaded WebP of `draftId`: its row, and every variant in R2. */
+  function addImage(draftId: string, { state = "ready", published = 0 } = {}) {
+    const id = crypto.randomUUID();
+    const src = `blog/${id}.webp`;
+    const widths = figureWidths(src, 1024);
+    sqlite
+      .prepare(
+        "INSERT INTO images (id, draft_id, ext, widths, width, height, state, published, " +
+          "created_at) VALUES (?, ?, 'webp', ?, 1024, 683, ?, ?, 0)",
+      )
+      .run(id, draftId, JSON.stringify(widths), state, published);
+    for (const width of widths) {
+      objects.set(variantKey(src, width), { body: new Uint8Array([1]), httpMetadata: {} });
+    }
+    return { id, src };
+  }
+  const figure = (src: string) => `::figure[]{src="${src}" alt="A photo" w="1024" h="683"}`;
+  const image = (id: string) =>
+    sqlite.prepare("SELECT draft_id, state, orphaned_at FROM images WHERE id = ?").all(id)[0];
+  const stored = (src: string) =>
+    figureWidths(src, 1024).map((w) => objects.has(variantKey(src, w)));
+
+  it("marks images the body drops as orphans, and ready again when they come back", async () => {
+    const { id } = await create();
+    const kept = addImage(id);
+    const dropped = addImage(id);
+    const uploading = addImage(id, { state: "pending" });
+    const both = `${figure(kept.src)}\n\n${figure(dropped.src)}`;
+
+    await call("PUT", `/${id}`, { baseRev: 1, bodyMd: figure(kept.src) });
+    expect(image(kept.id)).toMatchObject({ state: "ready", orphaned_at: null });
+    expect(image(dropped.id)).toMatchObject({ state: "orphan", orphaned_at: expect.any(Number) });
+    // An upload still in progress isn't in the body yet, and isn't an orphan.
+    expect(image(uploading.id)).toMatchObject({ state: "pending" });
+
+    // A save without a body leaves the marks alone.
+    await call("PUT", `/${id}`, { baseRev: 2, title: "Title only" });
+    expect(image(dropped.id)).toMatchObject({ state: "orphan" });
+
+    await call("PUT", `/${id}`, { baseRev: 3, bodyMd: both, revision: "manual" });
+    expect(image(dropped.id)).toMatchObject({ state: "ready", orphaned_at: null });
+  });
+
+  it("a save that lands still succeeds when marking its images fails", async () => {
+    const { id } = await create();
+    const photo = addImage(id);
+    const batch = db.batch.bind(db);
+    const failing = vi.spyOn(db, "batch").mockImplementation(async (statements) => {
+      if (statements.some((s) => /UPDATE images/.test((s as unknown as { sql: string }).sql))) {
+        throw new Error("D1 is busy");
+      }
+      return batch(statements);
+    });
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    const saved = await call("PUT", `/${id}`, { baseRev: 1, bodyMd: "No image." });
+    expect(saved).toMatchObject({ status: 200, json: { rev: 2 } });
+    expect(image(photo.id)).toMatchObject({ state: "ready" });
+    expect(JSON.stringify(log.mock.calls)).not.toContain(photo.id);
+    failing.mockRestore();
+    log.mockRestore();
+    // The next save with a body marks it.
+    await call("PUT", `/${id}`, { baseRev: 2, bodyMd: "Still no image." });
+    expect(image(photo.id)).toMatchObject({ state: "orphan" });
+  });
+
+  it("only marks the draft's own images", async () => {
+    const first = await create();
+    const second = await create();
+    const theirs = addImage(second.id);
+    await call("PUT", `/${first.id}`, { baseRev: 1, bodyMd: "No images here." });
+    expect(image(theirs.id)).toMatchObject({ state: "ready" });
+  });
+
+  it("restoring a revision marks against the restored body", async () => {
+    const { id } = await create();
+    const photo = addImage(id);
+    await call("PUT", `/${id}`, { baseRev: 1, bodyMd: figure(photo.src), revision: "manual" });
+    await call("PUT", `/${id}`, { baseRev: 2, bodyMd: "Gone." });
+    expect(image(photo.id)).toMatchObject({ state: "orphan" });
+    expect((await call("POST", `/${id}/revisions/2/restore`, { baseRev: 3 })).status).toBe(200);
+    expect(image(photo.id)).toMatchObject({ state: "ready", orphaned_at: null });
+  });
+
+  it("discarding deletes the unpublished images, objects and rows", async () => {
+    const { id } = await create();
+    const ready = addImage(id);
+    const orphan = addImage(id, { state: "orphan" });
+    const pending = addImage(id, { state: "pending" });
+    const published = addImage(id, { published: 1 });
+    expect((await call("DELETE", `/${id}`)).status).toBe(204);
+
+    for (const gone of [ready, orphan, pending]) {
+      expect(image(gone.id)).toBeUndefined();
+      expect(stored(gone.src)).toEqual([false, false]);
+    }
+    // A published image may be in a committed post, so it stays, without its draft.
+    expect(image(published.id)).toMatchObject({ draft_id: null, state: "ready" });
+    expect(stored(published.src)).toEqual([true, true]);
+  });
+
+  it("discarding keeps an image that another draft or its revisions still use", async () => {
+    const { id } = await create();
+    const inBody = addImage(id);
+    const inRevision = addImage(id);
+    // Only in another draft's current body: a plain autosave keeps no revision.
+    await create({ bodyMd: figure(inBody.src) });
+    // Only in another draft's revision.
+    const other = await create();
+    await call("PUT", `/${other.id}`, {
+      baseRev: 1,
+      bodyMd: figure(inRevision.src),
+      revision: "manual",
+    });
+    await call("PUT", `/${other.id}`, { baseRev: 2, bodyMd: "Moved on." });
+
+    expect((await call("DELETE", `/${id}`)).status).toBe(204);
+    expect(image(inBody.id)).toMatchObject({ draft_id: null });
+    expect(image(inRevision.id)).toMatchObject({ draft_id: null });
+    expect(stored(inBody.src)).toEqual([true, true]);
+    expect(stored(inRevision.src)).toEqual([true, true]);
+  });
+
+  it("still discards when R2 fails, leaving the rows to the daily clean-up", async () => {
+    const { id } = await create();
+    const photo = addImage(id);
+    photos = { ...photos, delete: () => Promise.reject(new Error("R2 is down")) };
+    const log = vi.spyOn(console, "error").mockImplementation(() => {});
+    expect((await call("DELETE", `/${id}`)).status).toBe(204);
+    expect(image(photo.id)).toMatchObject({ draft_id: null });
+    // The log line names no draft or image.
+    expect(log).toHaveBeenCalledOnce();
+    expect(JSON.stringify(log.mock.calls)).not.toContain(photo.id);
+    log.mockRestore();
+  });
+
+  it("deletes no images while a publish is open", async () => {
+    const { id } = await create();
+    const photo = addImage(id);
+    sqlite.prepare("UPDATE drafts SET status = 'publishing' WHERE id = ?").run(id);
+    expect((await call("DELETE", `/${id}`)).status).toBe(409);
+    expect(image(photo.id)).toMatchObject({ draft_id: id });
+    expect(stored(photo.src)).toEqual([true, true]);
   });
 });

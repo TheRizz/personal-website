@@ -2,7 +2,9 @@ import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { adminFetch } from "../app/lib/admin/api";
 import { ADMIN_API_ROUTES, ADMIN_PAGES } from "./admin";
+import { createD1 } from "./d1-fake";
 import worker from "./index";
+import { createR2 } from "./r2-fake";
 
 // Every request below goes through the Worker's real fetch(), so the gate is proven to run before
 // API dispatch and React Router. Rendering a page must never be reached without a valid token.
@@ -133,6 +135,82 @@ describe("the admin fetch wrapper", () => {
     expect(wrapped.headers.get("Allow")).toBe("GET");
     const plain = await inBrowser(() => fetch("/api/admin/me", write));
     expect(plain.status).toBe(404);
+  });
+});
+
+describe("images", () => {
+  /** The env with a fresh database holding one draft, and an empty bucket. */
+  async function withStorage() {
+    const { db, sqlite } = await createD1();
+    const { bucket, objects } = createR2();
+    const draftId = crypto.randomUUID();
+    sqlite
+      .prepare("INSERT INTO drafts (id, kind, created_at, updated_at) VALUES (?, 'new', 0, 0)")
+      .run(draftId);
+    return { storageEnv: { ...env, DB: db, PHOTOS: bucket }, sqlite, objects, draftId };
+  }
+
+  it("an owner's upload passes the gate with an image Content-Type", async () => {
+    const { storageEnv, objects, draftId } = await withStorage();
+    const send = (request: Request) =>
+      worker.fetch(request as Parameters<typeof worker.fetch>[0], storageEnv, ctx);
+    const headers = {
+      Origin: SITE,
+      "Sec-Fetch-Site": "same-origin",
+      "X-Admin": "1",
+      "Cf-Access-Jwt-Assertion": token,
+    };
+    const created = await send(
+      new Request(`${SITE}/api/admin/images`, {
+        method: "POST",
+        headers: { ...headers, "Content-Type": "application/json" },
+        body: JSON.stringify({ draftId, ext: "webp", width: 300, height: 200 }),
+      }),
+    );
+    expect(created.status).toBe(201);
+    const { id } = (await created.json()) as { id: string };
+
+    // A lossless WebP header: RIFF, WEBP, then one padded VP8L chunk.
+    const ascii = (value: string) => [...value].map((c) => c.charCodeAt(0));
+    const riff = [...ascii("WEBP"), ...ascii("VP8L"), 5, 0, 0, 0, 0x2f, 0x2b, 0xc0, 0x31, 0, 0];
+    const file = Uint8Array.from([...ascii("RIFF"), riff.length, 0, 0, 0, ...riff]);
+    const upload = (extra: Record<string, string>) =>
+      send(
+        new Request(`${SITE}/api/admin/images/${id}/300`, {
+          method: "PUT",
+          headers: { ...headers, "Content-Length": String(file.byteLength), ...extra },
+          body: file,
+        }),
+      );
+    // Any other body type is still refused at the gate.
+    expect((await upload({ "Content-Type": "text/plain" })).status).toBe(404);
+    expect(objects.size).toBe(0);
+    const uploaded = await upload({ "Content-Type": "image/webp" });
+    expect(uploaded.status).toBe(200);
+    expect(await uploaded.json()).toEqual({ state: "ready" });
+    expect(uploaded.headers.get("Cache-Control")).toBe("no-store, private");
+    expect([...objects.keys()]).toEqual([`blog/${id}-300.webp`]);
+  });
+
+  it("the daily cron runs the image clean-up", async () => {
+    const { storageEnv, sqlite, objects, draftId } = await withStorage();
+    const now = Date.UTC(2026, 9, 13, 4, 23);
+    const id = crypto.randomUUID();
+    sqlite
+      .prepare(
+        "INSERT INTO images (id, draft_id, ext, width, height, state, created_at) " +
+          "VALUES (?, ?, 'webp', 300, 200, 'pending', ?)",
+      )
+      .run(id, draftId, now - 2 * 24 * 60 * 60 * 1000);
+    objects.set(`blog/${id}-300.webp`, { body: new Uint8Array([1]), httpMetadata: {} });
+
+    const pending: Promise<unknown>[] = [];
+    const cronCtx = { waitUntil: (p: Promise<unknown>) => pending.push(p) };
+    const controller = { scheduledTime: now, cron: "23 4 * * *", noRetry: () => {} };
+    await worker.scheduled(controller, storageEnv, cronCtx as unknown as ExecutionContext);
+    await Promise.all(pending);
+    expect(sqlite.prepare("SELECT id FROM images").all()).toEqual([]);
+    expect(objects.size).toBe(0);
   });
 });
 

@@ -23,6 +23,7 @@ import {
   type DraftFields,
   type Revision,
 } from "~/lib/admin/drafts";
+import { figureSrcs, markImagesPublished } from "~/lib/admin/images";
 import { localDate, normalizeTags, postFile } from "~/lib/admin/post-file";
 import { Preview } from "./Preview";
 import { RichEditor } from "./RichEditor";
@@ -271,6 +272,19 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
 
   const file = postFile({ ...fields, slug: loaded.slug, cover: loaded.cover }, localDate());
 
+  // The file may be committed by hand from here, so its images must outlive this draft: discarding
+  // it and the daily clean-up skip published images (design doc §4.9.6).
+  const keepImages = () => {
+    const srcs = figureSrcs(fields.bodyMd);
+    if (srcs.length === 0) return;
+    markImagesPublished(srcs).catch(() =>
+      setNotice(
+        "Couldn't mark this post's images as published, so discarding the draft would delete " +
+          "them. Download or copy it again to retry.",
+      ),
+    );
+  };
+
   const download = () => {
     if (!file.ok) return setNotice(file.errors.join(" "));
     const url = URL.createObjectURL(new Blob([file.content], { type: "text/markdown" }));
@@ -280,6 +294,7 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
     link.click();
     URL.revokeObjectURL(url);
     setNotice(`Downloaded ${file.filename}. Commit it as ${file.path} to publish.`);
+    keepImages();
   };
 
   const copy = async () => {
@@ -289,7 +304,9 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
       setNotice(`Copied. Save it as ${file.path} to publish.`);
     } catch {
       setNotice("Couldn't copy. Use Download .md instead.");
+      return;
     }
+    keepImages();
   };
 
   const discard = async () => {
@@ -489,6 +506,7 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
                 initialDoc={richDoc}
                 onChange={setBodyMd}
                 label="Post body"
+                draftId={id}
               />
             ) : (
               <textarea

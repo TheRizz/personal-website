@@ -401,16 +401,28 @@ one-click publishing.
 > public page statically loads ProseMirror or the bridge. The preview uses fine-grained Shiki
 > (the `SHIKI_LANGS`, both themes, the JavaScript regex engine). `content-schema` turns off Zod's
 > JIT, which the CSP reports as `script-src eval`. Marking images `published = 1` on download
-> waits for Step 10.6, since no draft has images before it. Left for the owner: the keyboard-only
+> shipped with Step 10.6. Left for the owner: the keyboard-only
 > pass and a try on a real phone.
 
 ### Step 10.6: Image sections
-- [ ] `PHOTOS` R2 binding. `POST /api/admin/images` and `PUT /api/admin/images/:id/:width` with magic-byte sniffing that must match the row's `ext`, the metadata refusal (Exif, XMP, PNG `eXIf`, WebP `EXIF`/`XMP `, GIF XMP), the 10 MB cap and immutable metadata. GIFs are stored as `blog/<id>.gif` (§4.9.6).
-- [ ] Browser: `createImageBitmap`, canvas resize, WebP with a `blob.type` check, `@jsquash/webp` or JPEG fallback, GIF (sniffed from its bytes) as is, upload progress.
-- [ ] Figure node view: preview, required alt, size picker, Move up / Move down (`Alt+Shift+Up/Down`), Remove, inline caption.
-- [ ] Orphan marking on save, deletes on discard (unpublished images only), and the daily cron clean-up.
+- [x] `PHOTOS` R2 binding. `POST /api/admin/images` and `PUT /api/admin/images/:id/:width` with magic-byte sniffing that must match the row's `ext`, the metadata refusal (Exif, XMP, PNG `eXIf`, WebP `EXIF`/`XMP `, GIF XMP), the 10 MB cap and immutable metadata. GIFs are stored as `blog/<id>.gif` (§4.9.6).
+- [x] Browser: `createImageBitmap`, canvas resize, WebP with a `blob.type` check, `@jsquash/webp` or JPEG fallback, GIF (sniffed from its bytes) as is, upload progress.
+- [x] Figure node view: preview, required alt, size picker, Move up / Move down (`Alt+Shift+Up/Down`), Remove, inline caption.
+- [x] Orphan marking on save, deletes on discard (unpublished images only), and the daily cron clean-up.
 
 **Done when:** unit tests accept JPEG, PNG, WebP and GIF and refuse with 415 SVG, HTML, a renamed file, a type that differs from the row, and a raw phone JPEG that carries GPS. Re-encoded output has no `Exif` segment, and a GIF lands at a key with no width suffix. E2E inserts an image, moves it above a paragraph, the Markdown shows the `::figure` line in its new place, and the preview renders `figure` and `figcaption`. Discarding a draft after **Download .md** leaves its images in R2. The cron test deletes only stale `pending` rows and unpublished orphans. A JPEG uploaded from a phone in production shows up at `photos.ry-mart.com` with the immutable header and no GPS data.
+
+> **Built 2026-10-13 (Step 10.6).** Deviations from the plan: `@jsquash/webp` is deferred, so
+> Safari uploads JPEG, with ImageIO's own EXIF and Photoshop blocks stripped in the browser (the
+> Worker would refuse them). The Worker refuses more metadata than listed: JPEG `APP13` (IPTC),
+> PNG `Raw profile type` text, and every GIF application extension except looping, ICC and
+> ImageMagick's gamma. `POST /api/admin/images/published` marks a draft's figures published on
+> Download .md and Copy as Markdown. Besides stale `pending` rows and old orphans, the cron also
+> deletes uploads never inserted (after 7 days) and rows whose draft was discarded (after a day),
+> but never one a draft or revision body mentions. The editor refuses any change that turns a
+> figure into a heading, code block or list, since its caption is a textblock. Left for the
+> owner: the `photos` bucket and `photos.ry-mart.com` must exist before this deploys (the
+> `PHOTOS` binding names it), plus the phone upload check in production.
 
 ### Step 10.7: Owner setup, part 2: repo settings and GitHub App (no code)
 - [ ] Hosting guide §2.10: fix the `main` ruleset to match §2.4 (0 approvals, which the owner sets, required `ci`, Restrict updates off). Turn on Automatically delete head branches and leave Allow auto-merge off. From now on your own PRs merge by hand without the admin bypass once `ci` passes.

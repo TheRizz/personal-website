@@ -32,7 +32,11 @@ export async function adminFetch(path: string, init: RequestInit = {}): Promise<
   return response;
 }
 
-function markSessionExpired() {
+/**
+ * Marks the Access session expired and tells subscribers. `adminFetch` calls it on a 401; image
+ * uploads, which use XMLHttpRequest for progress, call it themselves.
+ */
+export function markSessionExpired() {
   if (sessionExpired) return;
   sessionExpired = true;
   for (const listener of listeners) listener();

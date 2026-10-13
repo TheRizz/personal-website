@@ -1,10 +1,12 @@
 import { postFrontmatter } from "@site/content-schema";
 import { jsonError, methodNotAllowed } from "./api";
+import { deleteImages, type ImagesEnv, type StoredImage } from "./images";
 
 // The drafts API on D1 (design doc §4.9.5, execution plan Step 10.4). The admin router mounts it
 // behind the owner gate, so nothing here checks access. Every value reaches SQL as a bound
 // parameter, and every statement in a batch carries its own rev guard, because a D1 batch keeps
-// going when an UPDATE matches no rows.
+// going when an UPDATE matches no rows. Saves also keep the draft's image rows in step with its
+// body (design doc §4.9.6).
 
 /** The largest draft body, in UTF-8 bytes. */
 export const MAX_BODY_BYTES = 512 * 1024;
@@ -74,11 +76,12 @@ function toDraft(row: DraftRow) {
 }
 
 /** Routes /api/admin/drafts and below. Returns null for any other path. */
-export async function handleDrafts(request: Request, db: D1Database): Promise<Response | null> {
+export async function handleDrafts(request: Request, env: ImagesEnv): Promise<Response | null> {
   const match = ROUTE.exec(new URL(request.url).pathname);
   if (!match) return null;
   const [, id, revisions, rev, restore] = match;
   const { method } = request;
+  const db = env.DB;
 
   if (id === undefined) {
     if (method === "GET") return listDrafts(db);
@@ -89,7 +92,7 @@ export async function handleDrafts(request: Request, db: D1Database): Promise<Re
   if (revisions === undefined) {
     if (method === "GET") return getDraft(db, id);
     if (method === "PUT") return saveDraft(request, db, id);
-    if (method === "DELETE") return discardDraft(db, id);
+    if (method === "DELETE") return discardDraft(env, id);
     return methodNotAllowed("GET, PUT, DELETE");
   }
   if (restore === undefined) {
@@ -190,12 +193,37 @@ function prune(db: D1Database, id: string, rev: number) {
 }
 
 /**
- * Keeps the saved version as a revision and prunes. Runs only after this request's UPDATE
- * succeeded, so a row at `rev` is this save's; if another save has moved it on, both statements
- * match nothing and the next snapshot catches up.
+ * Keeps the saved version as a revision and prunes, as statements for one batch. Runs only after
+ * this request's UPDATE succeeded, so a row at `rev` is this save's; if another save has moved it
+ * on, both statements match nothing and the next snapshot catches up.
  */
-async function keepRevision(db: D1Database, id: string, rev: number, reason: string, now: number) {
-  await db.batch([snapshot(db, id, rev, reason, now), prune(db, id, rev)]);
+function keepRevision(db: D1Database, id: string, rev: number, reason: string, now: number) {
+  return [snapshot(db, id, rev, reason, now), prune(db, id, rev)];
+}
+
+/**
+ * Marks the draft's images against its body at `rev`: a ready image the body no longer mentions
+ * becomes an orphan, and an orphan it mentions again is ready. Like `keepRevision`, both match
+ * nothing once another save has moved the row on, and that save marks against its own body. A
+ * mention is the id anywhere in the body, so an image is kept rather than lost on a near miss.
+ */
+function markImages(db: D1Database, id: string, rev: number, now: number) {
+  return [
+    db
+      .prepare(
+        "UPDATE images SET state = 'orphan', orphaned_at = ? WHERE draft_id = ? " +
+          "AND state = 'ready' AND EXISTS (SELECT 1 FROM drafts WHERE id = ? AND rev = ? " +
+          "AND instr(body_md, images.id) = 0)",
+      )
+      .bind(now, id, id, rev),
+    db
+      .prepare(
+        "UPDATE images SET state = 'ready', orphaned_at = NULL WHERE draft_id = ? " +
+          "AND state = 'orphan' AND EXISTS (SELECT 1 FROM drafts WHERE id = ? AND rev = ? " +
+          "AND instr(body_md, images.id) > 0)",
+      )
+      .bind(id, id, rev),
+  ];
 }
 
 /**
@@ -244,10 +272,20 @@ async function saveDraft(request: Request, db: D1Database, id: string): Promise<
   );
   const updated = results.at(-1)?.results[0];
   if (updated) {
+    const followUps: D1PreparedStatement[] = [];
     if (revision === "interval" || revision === "manual") {
-      await keepRevision(db, id, updated.rev, revision, now);
+      followUps.push(...keepRevision(db, id, updated.rev, revision, now));
     } else if (revision === "conflict") {
-      await prune(db, id, updated.rev).run();
+      followUps.push(prune(db, id, updated.rev));
+    }
+    if (followUps.length > 0) await db.batch(followUps);
+    if (fields.bodyMd !== undefined) {
+      try {
+        await db.batch(markImages(db, id, updated.rev, now));
+      } catch {
+        // The save itself landed, and the next save with a body marks again.
+        console.error("Marking a draft's images after a save failed.");
+      }
     }
     return Response.json({ rev: updated.rev }, { headers: noStore });
   }
@@ -271,13 +309,34 @@ async function conflictOrMissing(db: D1Database, id: string): Promise<Response> 
   );
 }
 
-/** Discards a draft and its revisions. Not while a publish is open. */
-async function discardDraft(db: D1Database, id: string): Promise<Response> {
-  const result = await db
-    .prepare("DELETE FROM drafts WHERE id = ? AND status != 'publishing'")
-    .bind(id)
-    .run();
-  if (result.meta.changes > 0) return new Response(null, { status: 204, headers: noStore });
+/**
+ * Discards a draft and its revisions. Not while a publish is open. Its unpublished images go too,
+ * objects and rows, unless another draft or one of its revisions mentions them. Published images
+ * stay: a committed post may show them.
+ */
+async function discardDraft(env: ImagesEnv, id: string): Promise<Response> {
+  const db = env.DB;
+  // The images are chosen in the same transaction as the delete, which sets their draft_id NULL.
+  const [images, discarded] = await db.batch<StoredImage>([
+    db
+      .prepare(
+        "SELECT id, ext, width FROM images WHERE draft_id = ? AND published = 0 " +
+          "AND NOT EXISTS (SELECT 1 FROM drafts WHERE id != ? AND instr(body_md, images.id) > 0) " +
+          "AND NOT EXISTS (SELECT 1 FROM draft_revisions WHERE draft_id != ? " +
+          "AND instr(body_md, images.id) > 0)",
+      )
+      .bind(id, id, id),
+    db.prepare("DELETE FROM drafts WHERE id = ? AND status != 'publishing' RETURNING id").bind(id),
+  ]);
+  if (discarded?.results.length) {
+    try {
+      await deleteImages(env, images?.results ?? []);
+    } catch {
+      // The draft is gone either way. Rows left without a draft go in the daily clean-up.
+      console.error("Deleting a discarded draft's images failed; the daily clean-up retries.");
+    }
+    return new Response(null, { status: 204, headers: noStore });
+  }
   const exists = await db.prepare("SELECT 1 AS found FROM drafts WHERE id = ?").bind(id).first();
   if (!exists) return draftNotFound();
   return jsonError(409, "publishing", "Cancel the open publish before discarding this draft.");
@@ -334,7 +393,10 @@ async function restoreRevision(
     .bind(now, id, rev, id, base)
     .first<{ rev: number }>();
   if (updated) {
-    await keepRevision(db, id, updated.rev, "restore", now);
+    await db.batch([
+      ...keepRevision(db, id, updated.rev, "restore", now),
+      ...markImages(db, id, updated.rev, now),
+    ]);
     return Response.json({ rev: updated.rev }, { headers: noStore });
   }
 
