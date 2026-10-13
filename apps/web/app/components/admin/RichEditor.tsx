@@ -6,6 +6,7 @@ import {
   Heading2,
   Heading3,
   Heading4,
+  ImagePlus,
   Italic,
   Link as LinkIcon,
   List,
@@ -17,8 +18,9 @@ import {
   Undo2,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useRef } from "react";
-import { editorExtensions } from "./editor-extensions";
+import { useEffect, useRef, useState } from "react";
+import { editorExtensions, selectedFigure } from "./editor-extensions";
+import { ImageDialog, type NewFigure } from "./ImageDialog";
 
 // The rich-text editor (design doc §4.9.3). Its JSON exists only in memory: every change goes
 // out as Markdown through the shared bridge, which is what D1 and git store.
@@ -42,14 +44,28 @@ export function safeHref(input: string): string | null {
   }
 }
 
+/** Inserts a figure at the selection, or after the figure the selection is in or on. */
+function insertFigure(editor: Editor, attrs: NewFigure) {
+  const figure = { type: "figure", attrs };
+  const { state } = editor;
+  const at = selectedFigure(state.selection);
+  const chain = editor.chain().focus();
+  // Inserting into a caption would split that figure in two, and over a selected one replace it.
+  if (at === null) chain.insertContent(figure).run();
+  else chain.insertContentAt(at + state.doc.nodeAt(at)!.nodeSize, figure).run();
+}
+
 export function RichEditor({
   initialDoc,
   onChange,
   label,
+  draftId,
 }: {
   initialDoc: DocNode;
   onChange: (markdown: string) => void;
   label: string;
+  /** The draft that uploaded images belong to. */
+  draftId: string;
 }) {
   const editorRef = useRef<Editor | null>(null);
   // useEditor keeps the options it was created with, so the latest callback is read from a ref.
@@ -94,16 +110,38 @@ export function RichEditor({
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-surface">
-      {editor && <Toolbar editor={editor} />}
+      {editor && <Toolbar editor={editor} onImage={() => fileInput.current?.click()} />}
       <EditorContent editor={editor} />
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(event) => {
+          const file = event.currentTarget.files?.[0];
+          // Picking the same file again should open the dialog again.
+          event.currentTarget.value = "";
+          if (file) setImageFile(file);
+        }}
+      />
+      {editor && imageFile && (
+        <ImageDialog
+          file={imageFile}
+          draftId={draftId}
+          onInsert={(figure) => insertFigure(editor, figure)}
+          onClose={() => setImageFile(null)}
+        />
+      )}
     </div>
   );
 }
 
-function Toolbar({ editor }: { editor: Editor }) {
+function Toolbar({ editor, onImage }: { editor: Editor; onImage: () => void }) {
   const state = useEditorState({
     editor,
     selector: ({ editor: e }) => ({
@@ -204,6 +242,7 @@ function Toolbar({ editor }: { editor: Editor }) {
         run: () => chain().toggleCodeBlock().run(),
       },
       { label: "Divider", icon: Minus, run: () => chain().setHorizontalRule().run() },
+      { label: "Image", icon: ImagePlus, run: onImage },
     ],
   ];
 

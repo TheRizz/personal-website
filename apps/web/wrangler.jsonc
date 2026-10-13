@@ -51,6 +51,13 @@
     },
   ],
 
+  // The public photos bucket (photos.ry-mart.com). The Worker only touches the editor's image
+  // keys under blog/: it uploads them and deletes unpublished ones (design doc §4.9.6).
+  "r2_buckets": [{ "binding": "PHOTOS", "bucket_name": "photos" }],
+
+  // The daily clean-up of abandoned image uploads (worker/images.ts, `cleanUpImages`).
+  "triggers": { "crons": ["23 4 * * *"] },
+
   // Cloudflare Access for the admin area (hosting guide §2.7); neither value is secret. If either
   // is empty or malformed, the owner gate refuses every admin request. The owner's e-mail is the
   // OWNER_EMAIL secret, never a var.

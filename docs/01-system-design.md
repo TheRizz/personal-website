@@ -542,8 +542,9 @@ sign in again" and keeps the unsaved text in `localStorage`.
 | `GET`, `POST` | `/api/admin/drafts` | list · create → `201 {id, rev}` |
 | `GET`, `PUT`, `DELETE` | `/api/admin/drafts/:id` | load · autosave `{baseRev, …fields}` → `200 {rev}` or `409 {rev, updatedAt}` · discard (deletes its images) |
 | `GET`, `POST` | `/api/admin/drafts/:id/revisions`, `…/revisions/:rev/restore` | list · restore (a new rev with reason `restore`) |
-| `POST` | `/api/admin/images` | `{draftId, ext, width, height, alt}` → `201 {id, widths}` |
-| `PUT` | `/api/admin/images/:id/:width` | raw bytes → `200` · `413` over 10 MB · `415` not JPEG, PNG, WebP or GIF, not the type recorded for `:id`, or carrying metadata |
+| `POST` | `/api/admin/images` | `{draftId, ext, width, height}` (the largest variant) → `201 {id, src, widths}` |
+| `PUT` | `/api/admin/images/:id/:width` | raw bytes → `200 {state}` · `411` no `Content-Length` · `413` over 10 MB · `415` not JPEG, PNG, WebP or GIF, not the type recorded for `:id`, or carrying metadata · `409` already published |
+| `POST` | `/api/admin/images/published` | `{srcs}` (at most 200 figure keys) → `200 {published}`, on Download .md and Copy as Markdown |
 | `GET` | `/api/admin/posts` | published posts on `main`, with blob SHAs |
 | `POST` | `/api/admin/drafts/:id/publish` | → `202 {pr, branch}` · `409` changed on GitHub · `422` validation errors |
 | `GET` | `/api/admin/drafts/:id/status` | → `{stage, pr, runUrl?, mergeSha?}` |
@@ -686,9 +687,9 @@ content, because Actions logs on a public repo are public), and the per-draft
 
 #### 4.9.6 Image uploads
 
-1. **Browser** (admin only): `createImageBitmap` applies the EXIF rotation. Canvas resizes to the variant widths (never upscaling) and encodes WebP at quality 0.8. Safari can't encode WebP from a canvas, so when `blob.type` isn't `image/webp` it lazy-loads `@jsquash/webp` or falls back to JPEG at 0.82. Re-encoding keeps only pixels, so EXIF and GPS are gone. GIFs (chosen by sniffing the file's bytes, not by its name or `file.type`) are uploaded as they are. SVG and AVIF are refused. Alt text is required before the image is inserted.
+1. **Browser** (admin only): `createImageBitmap` applies the EXIF rotation. Canvas resizes to the variant widths (never upscaling) and encodes WebP at quality 0.8. Safari can't encode WebP from a canvas, so when `blob.type` isn't `image/webp` it falls back to JPEG at 0.82 (`@jsquash/webp` stays an option for later). Safari's JPEG encoder (ImageIO) adds its own EXIF block (size and colour space only) and an empty Photoshop block, so the browser drops every APP segment but JFIF, ICC and Adobe before upload. Re-encoding keeps only pixels, so EXIF and GPS are gone. GIFs (chosen by sniffing the file's bytes, not by its name or `file.type`) are uploaded as they are. SVG and AVIF are refused. Alt text is required before the image is inserted.
 2. `POST /api/admin/images` returns a server-made UUID and the widths to upload, and writes a `pending` row.
-3. `PUT /api/admin/images/:id/:width` per variant. The Worker checks the owner and CSRF rules, requires `Content-Length` ≤ 10 MB, reads the bytes and sniffs magic bytes (JPEG `FF D8 FF`, PNG `89 50 4E 47`, GIF `GIF8`, WebP `RIFF…WEBP`). Anything else is 415, whatever the client claimed. The sniffed type must match the `ext` in the `images` row. The Worker also refuses (415) any file that carries metadata: JPEG `APP1` (Exif or XMP), PNG `eXIf` or an XMP `iTXt`, WebP `EXIF` or `XMP ` chunks (or those `VP8X` flags), a GIF XMP application extension. So a client bug can't publish a location; the browser step is not the only control. It then calls `PHOTOS.put("blog/<id>-<width>.<ext>", bytes, {httpMetadata: {contentType: <sniffed>, cacheControl: "public, max-age=31536000, immutable", contentDisposition: "inline"}})` (`blog/<id>.gif` for a GIF) and marks the row `ready` when every width is there.
+3. `PUT /api/admin/images/:id/:width` per variant. The Worker checks the owner and CSRF rules, requires `Content-Length` ≤ 10 MB, reads the bytes and sniffs magic bytes (JPEG `FF D8 FF`, PNG `89 50 4E 47`, GIF `GIF8`, WebP `RIFF…WEBP`). Anything else is 415, whatever the client claimed. The sniffed type must match the `ext` in the `images` row. The Worker also refuses (415) any file that carries metadata: JPEG `APP1` (Exif or XMP) or `APP13` (IPTC, which can name a place) anywhere before EOI, PNG `eXIf` or a text chunk keyed `XML:com.adobe.xmp` or `Raw profile type …` (ImageMagick's EXIF, XMP and IPTC), WebP `EXIF` or `XMP ` chunks (or those `VP8X` flags), and any GIF application extension other than looping (`NETSCAPE2.0`, `ANIMEXTS1.0`), a colour profile and ImageMagick's gamma note (so XMP and ImageMagick's Photoshop and IPTC blocks are refused). A truncated or malformed file is 415 too. So a client bug can't publish a location; the browser step is not the only control. It then calls `PHOTOS.put("blog/<id>-<width>.<ext>", bytes, {httpMetadata: {contentType: <sniffed>, cacheControl: "public, max-age=31536000, immutable", contentDisposition: "inline"}})` (`blog/<id>.gif` for a GIF) and marks the row `ready` when every width is there.
 4. The editor inserts the figure node: a preview, required alt, size picker, **Move up / Move down / Remove** buttons (also `Alt+Shift+Up/Down`, because dragging doesn't work on phones) and an inline caption that takes bold, italic and links.
 
 A Transform Rule on `photos.*` adds `X-Content-Type-Options: nosniff` (R2
@@ -699,8 +700,10 @@ Discarding a draft deletes the objects and rows of its images that aren't
 `published` (deletes are free). An image becomes `published` when the draft
 goes Live, or earlier when its `.md` is downloaded or copied, since that file
 may have been committed by hand. A daily cron (`scheduled()`, 1 of 5 free) deletes `pending` rows older
-than a day and unpublished orphans older than 7 days. An image that was ever
-published is never deleted automatically. A deleted object can stay in the
+than a day, unpublished orphans older than 7 days, uploads that never made it
+into a body (the dialog was cancelled) after 7 days, and rows whose draft was
+discarded after a day. It keeps any image that a draft or revision body still
+mentions. An image that was ever published is never deleted automatically. A deleted object can stay in the
 edge cache for up to a year unless purged by URL.
 
 #### 4.9.7 Publishing, editing and unpublishing

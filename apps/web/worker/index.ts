@@ -3,6 +3,7 @@ import { themeScript } from "../app/components/ThemeToggle";
 import { handleAdmin } from "./admin";
 import { requireOwner, withAdminHeaders } from "./admin-auth";
 import { handleApi } from "./api";
+import { cleanUpImages } from "./images";
 import {
   SECURITY_HEADERS,
   adminContentSecurityPolicy,
@@ -88,5 +89,10 @@ export default {
     else response = await route(request, env, renderPage);
     // `owner` is null only for a path that isn't admin; a refusal gets the admin policy too.
     return withSecurityHeaders(request, response, nonce, owner !== null);
+  },
+
+  // The only cron (wrangler.jsonc `triggers`): the daily clean-up of abandoned image uploads.
+  async scheduled(controller, env, ctx) {
+    ctx.waitUntil(cleanUpImages(env, controller.scheduledTime));
   },
 } satisfies ExportedHandler<Env>;
