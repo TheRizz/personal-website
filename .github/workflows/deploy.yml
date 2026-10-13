@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 # Never run two production deploys at once, and never cancel one halfway.
 concurrency:
@@ -26,6 +27,44 @@ jobs:
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID || vars.CLOUDFLARE_ACCOUNT_ID }}
       SITE_URL: https://ry-mart.com
     steps:
+      # The second guard on the publishing App (design doc §4.9.7): a stolen key can merge any PR
+      # whose `ci` is green, so a push to main that the App made, or that came from a PR it opened
+      # or merged, deploys only if it changes nothing outside content/blog/. Before checkout, so
+      # nothing from the repo runs first.
+      - name: Keep the publishing App to posts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BOT: ${{ vars.PUBLISH_BOT }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BOT" ]; then
+            echo "PUBLISH_BOT isn't set: there is no publishing App yet."
+            exit 0
+          fi
+          people=$(gh api "repos/$REPO/commits/$SHA/pulls" \
+            --jq '.[] | select(.merged_at != null) | .user.login, (.merged_by.login // "")')
+          people+=$'\n'$(gh api "repos/$REPO/commits/$SHA" \
+            --jq '(.author.login // ""), (.committer.login // "")')
+          if [ "$ACTOR" != "$BOT" ] && ! grep -qxF -- "$BOT" <<<"$people"; then
+            echo "The publishing App had no part in $SHA."
+            exit 0
+          fi
+          # A manual run has no previous push to compare with: use the commit's parent.
+          if ! [[ "$BEFORE" =~ ^[0-9a-f]{40}$ ]] || [[ "$BEFORE" =~ ^0+$ ]]; then
+            BEFORE=$(gh api "repos/$REPO/commits/$SHA" --jq '.parents[0].sha')
+          fi
+          outside=$(gh api --paginate "repos/$REPO/compare/$BEFORE...$SHA" \
+            --jq '(.files // [])[] | .filename, (.previous_filename // empty)' |
+            grep -v '^content/blog/' || true)
+          if [ -n "$outside" ]; then
+            echo "::error title=The publishing App changed more than posts::Revert $SHA. It changes $(tr '\n' ' ' <<<"$outside")"
+            exit 1
+          fi
+          echo "The publishing App's change only touches content/blog/."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Check Cloudflare credentials
         env:
@@ -45,16 +84,23 @@ jobs:
       - run: pnpm build
 
       # The owner gate refuses every admin request without OWNER_EMAIL. It was set in Step 10.0,
-      # so a missing secret now means something removed it: stop before deploying.
-      - name: Check the OWNER_EMAIL secret
+      # so a missing secret now means something removed it: stop before deploying. Once the
+      # publishing App's key is there, PUBLISH_BOT must be too, or the App guards are off.
+      - name: Check the Worker secrets
         working-directory: apps/web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PUBLISH_BOT: ${{ vars.PUBLISH_BOT }}
         run: |
           if ! secrets=$(pnpm exec wrangler secret list --format json); then
             echo "::warning title=Could not list Worker secrets::OWNER_EMAIL was not checked."
           elif ! jq -e 'any(.[]; .name == "OWNER_EMAIL")' <<<"$secrets" >/dev/null; then
             echo "::error title=OWNER_EMAIL is not set::Run 'pnpm wrangler secret put OWNER_EMAIL' in apps/web (hosting guide §2.9)."
+            exit 1
+          elif [ -z "$PUBLISH_BOT" ] &&
+            jq -e 'any(.[]; .name == "GITHUB_APP_PRIVATE_KEY")' <<<"$secrets" >/dev/null; then
+            # Without it, the guards in ci.yml and above can't tell the App's PRs apart.
+            echo "::error title=PUBLISH_BOT is not set::The Worker has the publishing App's key. Set the repository variable PUBLISH_BOT to the App's bot login (hosting guide §2.10)."
             exit 1
           fi
 

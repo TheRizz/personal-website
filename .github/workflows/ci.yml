@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -19,6 +20,38 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
+      # The publishing App may only change posts (design doc §4.9.7). This runs before checkout and
+      # install, inline, so no file from the PR can change it: the App has no Workflows
+      # permission, which protects .github/workflows/ but not scripts elsewhere. PUBLISH_BOT is
+      # the App's bot login, a repository variable (hosting guide §2.10); until it is set there is
+      # no App, and deploy.yml refuses to deploy a Worker that has its key without it.
+      - name: Keep the publishing App to posts
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BOT: ${{ vars.PUBLISH_BOT }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          set -euo pipefail
+          if [ -z "$BOT" ]; then
+            echo "PUBLISH_BOT isn't set: there is no publishing App yet."
+            exit 0
+          fi
+          people=$(gh api --paginate "repos/$REPO/pulls/$PR/commits" \
+            --jq '.[] | (.author.login // ""), (.committer.login // "")')
+          if [ "$AUTHOR" != "$BOT" ] && ! grep -qxF -- "$BOT" <<<"$people"; then
+            echo "The publishing App neither opened this PR nor made any of its commits."
+            exit 0
+          fi
+          outside=$(gh api --paginate "repos/$REPO/pulls/$PR/files" \
+            --jq '.[] | .filename, (.previous_filename // empty)' | grep -v '^content/blog/' || true)
+          if [ -n "$outside" ]; then
+            echo "::error title=The publishing App changed more than posts::$(tr '\n' ' ' <<<"$outside")"
+            exit 1
+          fi
+          echo "The publishing App's PR only changes content/blog/."
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
