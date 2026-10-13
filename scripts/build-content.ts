@@ -15,7 +15,7 @@ import {
   renderMarkdown,
   type Figure,
 } from "@site/content-markdown";
-import { postFrontmatter, type Post } from "@site/content-schema";
+import { postFrontmatter, readingMinutes, type Post } from "@site/content-schema";
 import matter from "gray-matter";
 import { bundledLanguages, createHighlighter } from "shiki";
 
@@ -24,8 +24,6 @@ const blogDir = path.join(root, "content/blog");
 const outDir = path.join(root, "apps/web/app/generated");
 const includeDrafts = process.argv.includes("--drafts");
 const checkImages = process.argv.includes("--check-images");
-
-const WORDS_PER_MINUTE = 220;
 
 const isoDate = (date: Date) => date.toISOString().slice(0, 10);
 
@@ -81,7 +79,7 @@ async function buildPosts(): Promise<Built[]> {
       date: isoDate(meta.date),
       updated: meta.updated && isoDate(meta.updated),
       tags: meta.tags,
-      readingMinutes: Math.max(1, Math.round(content.split(/\s+/).length / WORDS_PER_MINUTE)),
+      readingMinutes: readingMinutes(content),
       html,
       headings,
     };

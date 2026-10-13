@@ -21,6 +21,10 @@ export interface Draft extends DraftFields {
   rev: number;
   status: string;
   prNumber: number | null;
+  /** What the draft's pull request does, while it has one. */
+  prAction: "publish" | "unpublish" | null;
+  /** The frontmatter `date` (YYYY-MM-DD) of the version on `main`; null when it isn't there. */
+  postDate: string | null;
   createdAt: number;
   updatedAt: number;
   publishedAt: number | null;
@@ -46,32 +50,40 @@ export interface Revision {
 
 export type SaveReason = "interval" | "manual" | "conflict";
 
-/** A request the API refused, with its status and error code. */
+/**
+ * A request the API refused, with its status and error code. `details` holds the error body's
+ * other fields, such as the `rev` of a 409 or the `errors` of a 422.
+ */
 export class ApiError extends Error {
   constructor(
     readonly status: number,
     readonly code: string,
     message: string,
+    readonly details?: Record<string, unknown>,
   ) {
     super(message);
     this.name = "ApiError";
   }
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+/** Calls an admin API path and returns its JSON, or throws an `ApiError` for a refusal. */
+export async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await adminFetch(path, init);
   if (response.ok) return (response.status === 204 ? undefined : await response.json()) as T;
-  const body = (await response.json().catch(() => ({}))) as {
-    error?: { code?: string; message?: string };
-  };
+  const parsed: unknown = await response.json().catch(() => null);
+  const { error, ...details } = (
+    parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {}
+  ) as { error?: { code?: string; message?: string } } & Record<string, unknown>;
   throw new ApiError(
     response.status,
-    body.error?.code ?? "error",
-    body.error?.message ?? `Request failed (${response.status}).`,
+    error?.code ?? "error",
+    error?.message ?? `Request failed (${response.status}).`,
+    details,
   );
 }
 
-const json = (method: string, body: unknown): RequestInit => ({
+/** Request options for a JSON body; a string body gets the JSON content type the gate needs. */
+export const json = (method: string, body: unknown): RequestInit => ({
   method,
   body: JSON.stringify(body),
 });

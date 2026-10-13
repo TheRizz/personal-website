@@ -148,6 +148,23 @@ describe("Autosaver", () => {
     expect(calls[1]).toMatchObject({ baseRev: 2, fields: fields("ab") });
   });
 
+  it("saves nothing while disposed, and the changes made meanwhile once revived", async () => {
+    const { saver, calls } = setup();
+    saver.dispose();
+    saver.change(fields("a"));
+    await vi.advanceTimersByTimeAsync(20_000);
+    await saver.flush("manual");
+    expect(calls).toHaveLength(0);
+    expect(saver.current.status).toBe("dirty");
+
+    // The editor revives it when the server refuses a discard.
+    saver.revive();
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(calls).toEqual([{ baseRev: 1, fields: fields("a"), revision: undefined }]);
+    expect(saver.current).toMatchObject({ status: "saved", rev: 2 });
+    expect(saver.hasUnsavedChanges).toBe(false);
+  });
+
   it("reset takes the server's rev and drops pending changes", async () => {
     const { saver, calls } = setup();
     saver.change(fields("a"));

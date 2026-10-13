@@ -239,19 +239,37 @@ async function markPublished(request: Request, db: D1Database): Promise<Response
   ) {
     return invalid(`srcs must be at most ${MAX_PUBLISHED_SRCS} figure keys like blog/<id>.webp.`);
   }
-  if (srcs.length === 0) return Response.json({ published: 0 }, { headers: noStore });
+  const published = await markImagesPublished(db, srcs as string[]);
+  return Response.json({ published }, { headers: noStore });
+}
 
+/**
+ * The statement that marks the images with these figure keys published: ready and orphaned ones
+ * (an orphan becomes ready again), never a pending upload. With `guard`, it only matches while the
+ * draft has that merge SHA, so it can share a batch with the UPDATE that records the merge.
+ */
+export function markPublishedStatement(
+  db: D1Database,
+  srcs: string[],
+  guard?: { draftId: string; mergeSha: string },
+): D1PreparedStatement {
   const keys = JSON.stringify([...new Set(srcs)]);
-  const result = await db
-    .prepare(
-      "UPDATE images SET published = 1, state = 'ready', orphaned_at = NULL " +
-        "WHERE state IN ('ready', 'orphan') " +
-        "AND id IN (SELECT substr(value, 6, 36) FROM json_each(?)) " +
-        "AND 'blog/' || id || '.' || ext IN (SELECT value FROM json_each(?))",
-    )
-    .bind(keys, keys)
-    .run();
-  return Response.json({ published: result.meta.changes }, { headers: noStore });
+  const sql =
+    "UPDATE images SET published = 1, state = 'ready', orphaned_at = NULL " +
+    "WHERE state IN ('ready', 'orphan') " +
+    "AND id IN (SELECT substr(value, 6, 36) FROM json_each(?)) " +
+    "AND 'blog/' || id || '.' || ext IN (SELECT value FROM json_each(?))";
+  if (!guard) return db.prepare(sql).bind(keys, keys);
+  return db
+    .prepare(`${sql} AND EXISTS (SELECT 1 FROM drafts WHERE id = ? AND merge_sha = ?)`)
+    .bind(keys, keys, guard.draftId, guard.mergeSha);
+}
+
+/** Marks the images with these figure keys published. Returns how many rows changed. */
+export async function markImagesPublished(db: D1Database, srcs: string[]): Promise<number> {
+  if (srcs.length === 0) return 0;
+  const result = await markPublishedStatement(db, srcs).run();
+  return result.meta.changes;
 }
 
 /**

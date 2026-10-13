@@ -472,7 +472,7 @@ TipTap editor ── autosave ──────────▶ PUT /api/admin/d
   └─ Publish ───────────────────────▶ POST …/publish ── App token ──▶ commit on blog/<slug>-<t>
                                                                       → PR → ci → owner merges
                                                                       → deploy.yml → live
-     status every 10 s ◀───────────── GET …/status ◀── PR checks, deploy run, /api/health
+     status every 10 s ◀───────────── GET …/status ◀── PR checks, deploy run, live version
 ```
 
 #### 4.9.1 Access control
@@ -538,20 +538,27 @@ sign in again" and keeps the unsaved text in `localStorage`.
 
 | Method | Path | Request → response |
 |--------|------|--------------------|
-| `GET` | `/api/admin/me` | → `200 {email}`, sets `owner_hint` |
+| `GET`, `HEAD` | `/api/admin/me` | → `200 {email}`, sets `owner_hint` (the public Edit link probes with `HEAD`, so the e-mail never reaches a public page) |
 | `GET`, `POST` | `/api/admin/drafts` | list · create → `201 {id, rev}` |
 | `GET`, `PUT`, `DELETE` | `/api/admin/drafts/:id` | load · autosave `{baseRev, …fields}` → `200 {rev}` or `409 {rev, updatedAt}` · discard (deletes its images) |
 | `GET`, `POST` | `/api/admin/drafts/:id/revisions`, `…/revisions/:rev/restore` | list · restore (a new rev with reason `restore`) |
 | `POST` | `/api/admin/images` | `{draftId, ext, width, height}` (the largest variant) → `201 {id, src, widths}` |
 | `PUT` | `/api/admin/images/:id/:width` | raw bytes → `200 {state}` · `411` no `Content-Length` · `413` over 10 MB · `415` not JPEG, PNG, WebP or GIF, not the type recorded for `:id`, or carrying metadata · `409` already published |
 | `POST` | `/api/admin/images/published` | `{srcs}` (at most 200 figure keys) → `200 {published}`, on Download .md and Copy as Markdown |
-| `GET` | `/api/admin/posts` | published posts on `main`, with blob SHAs |
-| `POST` | `/api/admin/drafts/:id/publish` | → `202 {pr, branch}` · `409` changed on GitHub · `422` validation errors |
-| `GET` | `/api/admin/drafts/:id/status` | → `{stage, pr, runUrl?, mergeSha?}` |
-| `POST` | `/api/admin/drafts/:id/cancel` | closes the PR and deletes its branch |
-| `POST` | `/api/admin/posts/:slug/unpublish` | opens a PR that deletes the file |
+| `GET` | `/api/admin/posts` | → `200 {treeSha, posts}`: every `.md` file in `content/blog` on `main` with its slug (frontmatter `slug`, else the file name), blob SHA, title and dates, `problem` (`bad_path`, `binary`, `too_large`, `invalid`, `draft`, `custom_slug`; any problem makes it not editable) and the draft that tracks it |
+| `POST` | `/api/admin/posts/:slug/import` | `{}` → `201 {id, created: true}` (a new `kind: edit` draft from `main`) or `200 {id, created: false}` (the existing one) · `{refresh: true, baseRev}` ("Load the GitHub version") → `200 {id, created: false, rev, converted?}` · `409` `stale_draft {rev}`, `publishing`, `slug_in_use {draftId}` · `422` `unsupported_post {problem}` |
+| `POST` | `/api/admin/drafts/:id/publish` | `{baseRev, date, slug?}` (`date` is the browser's local date, accepted within a day of the server's) → `202` the status below plus `{republished, warnings?: ["pr_not_updated"]}` · `409` `stale_draft {rev}`, `changed_on_github {sha}`, `changed_on_github_open_pr {sha}`, `branch_changed`, `pr_not_open`, `pr_mismatch`, `unpublishing`, `publishing` · `422` `invalid_post {errors}`, `unsupported_post {problem}`, `images_not_ready {srcs}`, `slug_taken {where, pr?}`, `no_changes`, `owner_email` |
+| `GET` | `/api/admin/drafts/:id/status` | → `200 {stage, action, pr, prUrl, branch, runUrl, mergeSha, slug, mergedOtherVersion}`; `stage` is `draft`, `opened`, `ci_running`, `ci_failed`, `review`, `merged`, `deploying`, `deploy_failed`, `live` or `closed` · `502 pr_mismatch` |
+| `POST` | `/api/admin/drafts/:id/cancel` | `{}` → closes the PR, deletes its branch, `200` with stage `draft` · `409` `not_publishing`, `already_merged`, `pr_mismatch` |
+| `POST` | `/api/admin/posts/:slug/unpublish` | `{}` → opens a PR that deletes the file, `202` the status plus `{draftId}` · `409` `publishing`, `slug_in_use {draftId}`, `changed_on_github` · `422` `unsupported_post {problem: "bad_path"}`, `owner_email` |
 
-Errors use the same JSON shape as the rest of `/api` (§4.5).
+Errors use the same JSON shape as the rest of `/api` (§4.5). The publishing routes add their extra
+fields beside `error` (`{"error": {"code", "message"}, "rev": 3}`) and send `Cache-Control:
+no-store` on every answer. Every publishing route can also answer `502 github_error` (GitHub
+didn't answer, or answered something unexpected), `503 github_unavailable` (the App lost access
+to the repository, `GITHUB_API_BASE` on a real host, or the e2e test key without the stub) or
+`503 misconfigured` (a missing or wrong secret, `GIT_AUTHOR` or token grant), and `500
+internal_error`. The POST bodies are strict: an unknown key is `400 bad_request`.
 
 #### 4.9.3 Editor
 
@@ -636,7 +643,7 @@ CREATE TABLE drafts (
   status TEXT NOT NULL DEFAULT 'draft'
     CHECK (status IN ('draft','publishing','published','failed','archived')),
   pr_number INTEGER, pr_branch TEXT, head_sha TEXT, merge_sha TEXT,
-  publish_error TEXT,                -- HTTP status or run URL only, never content
+  publish_error TEXT,                -- a run URL only, never content
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, published_at INTEGER
 );
 CREATE TABLE draft_revisions (
@@ -662,6 +669,26 @@ CREATE TABLE images (
 CREATE INDEX images_by_draft ON images(draft_id);
 CREATE INDEX images_by_state ON images(state, orphaned_at);
 ```
+
+**Publishing columns.** Migration `0002_publish.sql` adds three columns. It only adds, because
+`wrangler rollback` doesn't roll back D1:
+
+```sql
+ALTER TABLE drafts ADD COLUMN pr_action TEXT CHECK (pr_action IN ('publish', 'unpublish'));
+ALTER TABLE drafts ADD COLUMN pr_blob_sha TEXT;  -- blob SHA of the file the PR last pushed; NULL for unpublish
+ALTER TABLE drafts ADD COLUMN post_date TEXT;    -- frontmatter date of the version on main; NULL when not on main
+```
+
+`status` means: `draft`, no PR; `publishing`, a PR is open, or it is merged but not live yet
+(`merge_sha` set); `failed`, merged but the deploy failed; `published`, the last publish went
+live. `kind = 'edit'` means the file is on `main`: import sets it, and so does the first status
+poll that sees a publish PR merged, which also sets `base_sha` to the blob SHA of the file at the
+merge commit and `post_date` to its frontmatter date. An unpublish merge sets `kind = 'new'` and
+clears `source_path`, `base_sha` and `post_date`. `pr_blob_sha` is kept after Live, so status can
+tell when GitHub merged a version other than the last one pushed (`mergedOtherVersion`).
+`publish_error` holds a GitHub Actions run URL, checked by `safeRunUrl`, or nothing. Every publish
+and republish adds a `publish` revision. `post_date` lets **Download .md** write the date of the
+version on `main`.
 
 **Autosave.** 2 s after the last keystroke, at most every 10 s while typing.
 `PUT` runs `UPDATE drafts SET …, rev = rev + 1 WHERE id = ? AND rev = ? RETURNING rev`.
@@ -697,9 +724,9 @@ metadata can't set it). **Privacy:** draft images are public to anyone who has
 the URL, but the keys have 122 random bits and public buckets can't be listed.
 **Clean-up:** each save marks images the draft no longer uses as orphans.
 Discarding a draft deletes the objects and rows of its images that aren't
-`published` (deletes are free). An image becomes `published` when the draft
-goes Live, or earlier when its `.md` is downloaded or copied, since that file
-may have been committed by hand. A daily cron (`scheduled()`, 1 of 5 free) deletes `pending` rows older
+`published` (deletes are free). An image becomes `published` when a status poll
+first sees the draft's PR merged (§4.9.7), or earlier when its `.md` is
+downloaded or copied, since that file may have been committed by hand. A daily cron (`scheduled()`, 1 of 5 free) deletes `pending` rows older
 than a day, unpublished orphans older than 7 days, uploads that never made it
 into a body (the dialog was cancelled) after 7 days, and rows whose draft was
 discarded after a day. It keeps any image that a draft or revision body still
@@ -711,10 +738,13 @@ edge cache for up to a year unless purged by URL.
 **Checks before anything leaves D1.** The browser renders the post with
 `renderMarkdown()` and runs `postFrontmatter`, and blocks Publish on any error.
 The Worker runs `postFrontmatter` again, a regex lint of each `::figure` line,
-checks that every figure key is a `ready` row in `images`, checks the
+checks that every figure key is a `ready` or already published row in `images`
+(figures the version on `main` already shows are exempt), checks the
 target path against `^content/blog/\d{4}-\d{2}-\d{2}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$`,
-and checks the slug against `main` and open `blog/*` PRs. The Worker never runs
-unified or Shiki (10 ms CPU). CI is the final check.
+and checks the slug against other drafts, `main` (every post's effective slug, `draft: true`
+files included) and open `blog/<slug>-<n>` PRs. It refuses any outgoing text that contains
+`OWNER_EMAIL` (§4.9.8) and a publish that changes nothing but `updated` (`422 no_changes`). The
+Worker never runs unified or Shiki (10 ms CPU). CI is the final check.
 
 **Confirm dialog.** "Publishing makes this text public on a GitHub pull request
 now. It goes live about a minute after you merge that PR, and it stays in git
@@ -730,22 +760,40 @@ had one. Never `slug` or `draft`. `date` never changes after the first publish.
 Republishing a published post sets `updated` to the owner's local date at that
 publish.
 
-**Publish** (`POST /api/admin/drafts/:id/publish`, at most about 10 GitHub
-calls, under the 50-subrequest limit, all with a `User-Agent` and an
-installation token):
+**Publish** (`POST /api/admin/drafts/:id/publish`, at most about 14 GitHub
+calls with a cold isolate and a clean-up, under the 50-subrequest limit, all
+with a `User-Agent`, a 10 s timeout, no redirects followed and an installation
+token). Four fixed GraphQL queries do the list and status reads: the
+`content/blog` tree probe, the posts list, the open-PR scan and the PR status
+before a merge. Every other call is REST, reads and writes alike. The client
+has no raw call and refuses any query document that contains `mutation`.
 
-1. Mint the installation token (an RS256 App JWT, then `POST /app/installations/{id}/access_tokens`), cached in the isolate until close to expiry.
-2. `GET git/ref/heads/main` → commit M and tree T.
+1. Mint the installation token: an RS256 App JWT, then `POST /app/installations/{id}/access_tokens` asking for `personal-website` only and exactly Contents and Pull requests write and Actions and Checks read. A grant with any other repository or permission is refused (`503 misconfigured`). The token is cached in the isolate until 5 minutes before it expires, and a 401 drops it and mints once more. A cold isolate also looks up the bot: `GET /app` → slug, `GET /users/<slug>[bot]` → id.
+2. `GET git/ref/heads/main` → commit M, then `GET git/commits/M` → tree T. For a new post, the slug check: no post on `main` and no open same-repo PR on `blog/<slug>-<n>` may have that slug (`422 slug_taken`).
 3. For an edit, read the file on M (`GET contents` returns its blob SHA and text) and compare the SHA with `base_sha`. Different means someone changed it in git: `409`, and the editor offers to load the GitHub version. It never overwrites silently. The text is the old version for the PR's "What changed".
-4. `POST git/trees` with `base_tree: T`: the file, plus `sha: null` for an old path on unpublish.
-5. `POST git/commits` → C. Author: the owner's GitHub no-reply identity from the plain var `GIT_AUTHOR` (`TheRizz <19941577+TheRizz@users.noreply.github.com>`), never `OWNER_EMAIL`, which would go into public history. Committer: the App's bot. A unit test checks that no GitHub request body contains `OWNER_EMAIL`.
+4. `POST git/trees` with `base_tree: T`: the file, or `sha: null` for its path on unpublish.
+5. `POST git/commits` → C. Author: the owner's GitHub no-reply identity from the plain var `GIT_AUTHOR` (`TheRizz <19941577+TheRizz@users.noreply.github.com>`), never `OWNER_EMAIL`, which would go into public history. Committer: the App's bot, `<slug>[bot] <<id>+<slug>[bot]@users.noreply.github.com>`, sent explicitly. A unit test checks that no GitHub request body contains `OWNER_EMAIL`.
 6. `POST git/refs` → `refs/heads/blog/<slug>-<unix time>`.
 7. `POST pulls` with the title and body below. The Worker stops here: it never merges and never turns on auto-merge. The owner reviews the PR and merges it.
+8. One guarded D1 batch claims the draft (`status = 'publishing'`, the PR number, branch and head) and adds the `publish` revision.
+
+Every outgoing text is built and checked before step 4, so a refusal writes nothing to GitHub.
+If anything fails after the branch exists (a GitHub error, a lost race with another tab, a D1
+error), the Worker closes the PR and deletes the branch, best effort, and D1 keeps the draft as it
+was. Publish, unpublish and cancel run under `ctx.waitUntil`, so closing the tab can't stop them
+between GitHub and D1.
 
 Publishing again while that PR is open pushes a new commit to the same branch
 (`PATCH git/refs`, `force: false`) instead of opening a second PR, refreshes the
 body (`PATCH pulls`) and adds a comment saying what changed since the previous
-`publish` revision.
+`publish` revision. It first checks that the PR is still open and is ours (head
+branch, head repository, base `main`), and that its branch (`GET git/ref`, not
+the PR's head, which GitHub updates a little after a push) is still at the head
+D1 recorded; otherwise `409 pr_not_open`, `pr_mismatch` or `branch_changed`.
+The way out of `branch_changed` is to merge as is, or cancel and publish again:
+the Worker never pushes on top of changes it didn't inspect. D1 records the new
+head as soon as the branch moves. The body refresh and the comment are best
+effort, and a failure only adds the warning `pr_not_updated`.
 
 **The PR.** Built from the post alone (never `OWNER_EMAIL`, draft ids or other
 drafts), so the owner can review it on GitHub, from a phone too:
@@ -756,31 +804,45 @@ drafts), so the owner can review it on GitHub, from a phone too:
 - **What changed:** for an update, a table of the frontmatter fields that changed (old → new), then each body section (split at H2 and H3 lines) that was added, removed or edited, by heading, with its word-count change, and figures added or removed. For a new post, its section headings and word count. For an unpublish, the deleted path. Plain string work, well inside 10 ms of CPU.
 - **Review checklist** (task list): reads well; alt text and captions right; summary and tags right; nothing private in the text or images; `ci` green, then **Squash and merge**.
 
-**Status.** The editor polls every 10 s. The Worker makes one GraphQL query
-(PR state, checks, merge commit), then `GET actions/runs?head_sha=<merge>&event=push`,
-then reads `/api/health`. Stages: *PR #N opened → CI running (about 2 min) →
-waiting for your review (links to the PR) → merged → deploying (about 1 min) →
-Live*, where Live means `/api/health` reports the merge SHA. Then the draft's
-images get `published = 1`. A PR closed on GitHub without a merge puts the
-draft back to Draft. On a CI failure: a link to the run, "Fix and republish" or
-"Cancel" (closes the PR, deletes the branch). On a deploy failure: a link to
-the run (one real deploy has already needed a manual re-run).
+**Status.** The editor polls every 10 s while the stage can still change and the
+tab is visible, plus **Check now**. Stages: *PR #N opened → CI running (about
+2 min) → waiting for your review (links to the PR) → merged → deploying (about
+1 min) → Live*.
+
+- **Before the merge**, one GraphQL query reads the PR's state, head and merge commit, the merged file's text, and the `ci` check run on the head from GitHub Actions' check suite (App id 15368). That needs only Checks read; commit statuses aren't readable by the App. The Worker acts only on a PR whose head branch, head repository and base match what D1 recorded (`502 pr_mismatch` otherwise, with no D1 write), and a missing repository (the App lost access, or the repo was renamed) is `503` with no D1 write, never "closed".
+- **Image marking.** The first poll that sees the merge records `merge_sha` and, in the same D1 batch, sets `published = 1` on every image the merged file mentions (or every `publish` revision of the draft, when the text isn't available; marking too many is safe). Both land or neither does, and the next poll tries again.
+- **After the merge** there is no GraphQL query. The post is **Live** when the running Worker's version (`__APP_VERSION__`, read in-process, no self-request) is the merge SHA, or a later commit that contains it (`GET compare/<merge>...<version>` says `ahead` or `identical`), or the `deploy.yml` push run for the merge SHA succeeded. A run that GitHub cancelled because a newer deploy queued shows *deploying*, not failed; the compare turns it Live once the later deploy ships.
+- **A PR closed on GitHub** without a merge puts the draft back to Draft and deletes the branch, so it can't be reopened and merged behind D1's back. A new post that never went live also gives up its slug.
+- On a CI failure: a link to the run, "Fix and republish" or "Cancel" (closes the PR, deletes the branch). On a deploy failure: a link to the run (one real deploy has already needed a manual re-run). Run links are kept only when they point into this repository on `https://github.com`.
 
 **Editing a published post.** `/api/admin/posts` lists `content/blog` on `main`
-with one GraphQL tree-and-blob query, cached by tree SHA. Edit imports the file
-into a draft (`kind: edit`, `source_path`, `base_sha`) or reuses the existing
-one. Publishing keeps the file name and `date` and sets `updated` to the
-publish day, and the post page shows both dates. The slug is locked, so a link
-that was copied and shared keeps working.
+with one GraphQL tree-and-blob query, cached in the isolate by the directory's
+tree OID behind a cheap probe query. Edit (`POST /api/admin/posts/:slug/import`)
+imports the file into a draft (`kind: edit`, `source_path`, `base_sha`,
+`post_date`) or reuses the existing one. A file with `draft: true`, a
+frontmatter `slug` that differs from its file name, a binary or too-large file,
+or one that doesn't parse is listed but can't be edited, so a change made on
+GitHub can't be overwritten into a live post or moved to a new URL. Publishing
+keeps the file name and `date` and sets `updated` to the publish day, and the
+post page shows both dates. The slug is locked, so a link that was copied and
+shared keeps working. When the file changed on GitHub, publish answers
+`409 changed_on_github` and the editor offers **Load the GitHub version**
+(`{refresh: true, baseRev}`): the draft's text is kept as a `conflict` revision
+and replaced by the file on `main`. If the file is gone from `main`, refresh
+turns the draft back into a new post instead.
 
-**Unpublishing** is the same PR flow with a `sha: null` tree entry. The post
-leaves the site on the next deploy, but stays in public git history, and the UI
-says so. For something urgent, a WAF custom rule blocking `/blog/<slug>` takes
+**Unpublishing** is the same PR flow with a `sha: null` tree entry, titled from
+the file at the commit it branches from. It works for any post file on `main`,
+including ones the editor can't edit, and creates a tracking draft when the post
+has none. The post leaves the site on the next deploy, but stays in public git
+history, and the UI says so. Its images stay at `photos.ry-mart.com` (hosting
+guide §6). For something urgent, a WAF custom rule blocking `/blog/<slug>` takes
 effect in seconds (hosting guide §6).
 
 **The App's reach.** Contents and Pull requests write, Actions and Checks read,
 no Workflows permission, installed on this repo only, and never a ruleset bypass
-actor. A second ruleset stops it from creating or updating any branch except
+actor. The token the Worker mints is narrowed to this repository and those four
+permissions, and the grant is checked. A second ruleset stops it from creating or updating any branch except
 `blog/**` (`main` changes only through a PR that passes `ci`). The Worker never
 calls a merge endpoint, but Contents and Pull requests write still let a stolen
 key merge **any** open PR whose `ci` is green (Dependabot's, the owner's
@@ -804,7 +866,8 @@ hosting guide §2.10 checks it.
 | XSS riding the owner's session | Only Markdown is stored. All HTML comes from the shared pipeline with `rehype-sanitize`. Figure `src` must be an R2 key. No raw HTML. Admin CSP, sent instead of the site-wide one on every admin path: `default-src 'self'; script-src 'self' 'nonce-…' 'sha256-<theme script>' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' https://photos.ry-mart.com blob: data:; font-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'` (a per-request nonce for React Router's inline scripts; no analytics and no WebSocket). Site-wide CSP from §4.8 everywhere else. |
 | Malicious upload (SVG with script, polyglot, huge file) | Magic-byte allowlist that must match the recorded type, type set from the sniff, `nosniff`, inline disposition, 10 MB cap, owner only |
 | Private data in the public repo | Drafts only in D1. Owner e-mail and App key are Worker secrets, and commits use the no-reply author. EXIF stripped in the browser, and the Worker refuses files with metadata. PR body holds post content only. `*.pem` and `*.key` are gitignored, and the App key is converted outside the repo. Push protection is on. |
-| Private data in logs | The Worker never logs draft bodies or image keys (Workers observability is on). `publish_error` holds status codes and run URLs only. `backup.yml` prints no content. |
+| The owner's e-mail in a commit or PR (typed into a post, or in `GIT_AUTHOR`) | Every outgoing text (file, path, commit message, author, branch, PR title and body, comment) is built and checked before the first GitHub write: `422 owner_email`, nothing written. The check normalises first, then searches case-insensitively: NFKC (`＠` → `@`), character references (`&#64;`, `&#x40;`, `&commat;`), percent-encoding (`%40`), zero-width characters and soft hyphens, and a backslash before punctuation (the editor stores `a\@b`). It runs that twice, so double encodings (`&amp;#64;`, `%2540`) are caught too. The GitHub client checks every request URL and every string in every request body again at send time, and a hit there gets the same clean-up as a GitHub failure. Values from the previous version that contain the address are printed in the PR as "(contains a private address)", so an edit that removes a leak can still publish; an unpublish title falls back to the path. `GIT_AUTHOR` must be a GitHub no-reply address that isn't the owner's, or publishing answers `503 misconfigured` with no GitHub request. |
+| Private data in logs | The Worker never logs draft bodies or image keys (Workers observability is on). Publishing logs only the error's class, the GitHub route template and the HTTP status, plus the name of a misconfigured setting or permission and the host of an `ALERT`: never tokens, URLs with values, slugs, titles, paths or draft ids. `publish_error` holds run URLs only. `backup.yml` prints no content. |
 | Stolen App key | It can push `blog/**` branches, open and close PRs, create tags, and merge **any** PR whose `ci` is green, including a stranger's fork PR. The Worker itself never merges, and auto-merge is off in the repo. The `ci.yml` guard fails its own PRs that touch code. The `deploy.yml` guard refuses to deploy a bot merge that touches code, and the owner reverts it. Rotate the key in the App settings. |
 | Lost work | Rev check (409), conflict snapshot, `localStorage` copy, revisions, Time Travel, nightly export, `base_sha` check before publish. Images of a downloaded `.md` are never deleted automatically. |
 | Test identity leaking into production | See §4.9.9 |
@@ -814,8 +877,9 @@ hosting guide §2.10 checks it.
 
 Tests sign their own tokens. Production auth has no switch to turn it off.
 
-- **Unit (Vitest, Node):** `verifyAccessJwt` with a generated key pair and a local key set: valid, wrong audience, wrong issuer, expired, HS256 confusion, wrong e-mail. `requireOwner`: wrong host, missing or foreign Origin, cross-site `Sec-Fetch-Site`, a missing header with a valid `CF_Authorization` cookie, and `/ADMIN`, `/API/ADMIN/me`, `/%61pi/admin/me`, `/admin.data` returning 404 even with a valid token. A table-driven test walks every admin route and expects 404 without a token. Bridge golden tests: parse → doc → serialize is idempotent, the rendered HTML is the same before and after a round trip, typed syntax stays escaped, `16:9` and `10:30am` survive, bad figures fail. Upload sniffing (SVG, a renamed file, and a type that differs from the row are 415), a raw phone JPEG with GPS is 415, the GIF key has no width suffix, and no `Exif` segment after re-encoding. D1 revision checks with fakes. The GitHub client against fetch fakes: the full publish sequence, slug collision, `base_sha` 409, token expiry, no request to a merge or auto-merge endpoint, and no request body containing `OWNER_EMAIL`. PR title and body for a new post, an update (frontmatter table, sections added, removed and edited) and an unpublish. The frontmatter writer round-trips through `gray-matter` and `postFrontmatter`.
-- **E2E (Playwright against `vite preview`):** `pnpm e2e:keys` runs **before** `pnpm build` (in CI and in the local `pnpm e2e` server command), because the Vite plugin copies `.dev.vars` into the build output at build time and `vite preview` reads that copy. It writes only the public key (`ACCESS_TEST_JWKS`) to the gitignored `apps/web/.dev.vars`, and the private key to the gitignored `e2e/.auth/`. Wrangler drops `.dev.vars` keys that aren't declared once a `secrets` block exists, so `OWNER_EMAIL` is not declared in `secrets.required`; `deploy.yml` checks `wrangler secret list` for it instead, and the gate fails closed without it. Global setup signs a token and fails fast with a clear message if `/api/admin/me` doesn't accept it. Tests send it in `Cf-Access-Jwt-Assertion`. The Worker reads `ACCESS_TEST_JWKS` only when the host is `localhost` or `127.0.0.1`. If it is set on any other host, the gate logs an alert and refuses every admin request. GitHub is a local stub through a `GITHUB_API_BASE` override, which is honoured on localhost only. Local D1 and R2 come from Miniflare.
+- **Unit (Vitest, Node):** `verifyAccessJwt` with a generated key pair and a local key set: valid, wrong audience, wrong issuer, expired, HS256 confusion, wrong e-mail. `requireOwner`: wrong host, missing or foreign Origin, cross-site `Sec-Fetch-Site`, a missing header with a valid `CF_Authorization` cookie, and `/ADMIN`, `/API/ADMIN/me`, `/%61pi/admin/me`, `/admin.data` returning 404 even with a valid token. A table-driven test walks every admin route and expects 404 without a token. Bridge golden tests: parse → doc → serialize is idempotent, the rendered HTML is the same before and after a round trip, typed syntax stays escaped, `16:9` and `10:30am` survive, bad figures fail. Upload sniffing (SVG, a renamed file, and a type that differs from the row are 415), a raw phone JPEG with GPS is 415, the GIF key has no width suffix, and no `Exif` segment after re-encoding. D1 revision checks with fakes. The GitHub client against a recording fetch fake (`worker/github-fake.ts`, which answers only the client's routes): the full publish sequence, slug collision, `base_sha` 409, token expiry, no request to a merge or auto-merge endpoint, and no request URL or body containing `OWNER_EMAIL`, in any of the encodings above. PR title and body for a new post, an update (frontmatter table, sections added, removed and edited) and an unpublish. Republish, cancel and unpublish, the status derivation tables and every D1 transition, clean-up after a failure at each write, and `GITHUB_API_BASE` refused on any host but localhost. The frontmatter writer round-trips through `gray-matter` and `postFrontmatter`.
+- **E2E (Playwright against `vite preview`):** `pnpm e2e:keys` runs **before** `pnpm build` (in CI and in the local `pnpm e2e` server command), because the Vite plugin copies `.dev.vars` into the build output at build time and `vite preview` reads that copy. It writes the Access public key (`ACCESS_TEST_JWKS`) and matching Access settings to the gitignored `apps/web/.dev.vars`, plus the GitHub stub's settings, which include a throwaway test App's private key (next bullet). The Access private key and the App key pair stay in the gitignored `e2e/.auth/`. Wrangler drops `.dev.vars` keys that aren't declared once a `secrets` block exists, so `OWNER_EMAIL` is not declared in `secrets.required`; `deploy.yml` checks `wrangler secret list` for it instead, and the gate fails closed without it. Global setup signs a token and fails fast with a clear message if `/api/admin/me` doesn't accept it. Tests send it in `Cf-Access-Jwt-Assertion`. The Worker reads `ACCESS_TEST_JWKS` only when the host is `localhost`, `127.0.0.1` or `[::1]`. If it is set on any other host, the gate logs an alert and refuses every admin request. GitHub is a local stub through a `GITHUB_API_BASE` override, which is honoured on localhost only. Local D1 and R2 come from Miniflare.
+- **GitHub stub (e2e):** `e2e/github-stub.ts` (Node `http`, in-memory git model with real blob SHAs, no new dependencies) listens on `127.0.0.1` at `E2E_GITHUB_PORT` (default `E2E_PORT + 1000`). Playwright starts it before the preview. `pnpm e2e:keys` writes `GITHUB_API_BASE` and a test App (client id, installation id, PKCS#8 key) into `.dev.vars`, and keeps the key pair in the gitignored `e2e/.auth/github-app.json`, which the stub reads to verify the App JWT and the narrowed token request. The Worker honours `GITHUB_API_BASE` only when the request host is `localhost`, `127.0.0.1` or `[::1]` and the base itself is a local `http(s)` origin; on any other host it logs an `ALERT` and refuses to publish. It also refuses when the test key is set without a valid stub base, so local publishing always uses the stub and the test identity never reaches GitHub. With the stub, the live version comes from the stub's `GET /__e2e/health` instead of `__APP_VERSION__` (fixed when the build ran), so a test can make a merge go Live. Global setup checks the build reaches the stub: `GET /api/admin/posts` must answer, and the stub's request log must hold its `PostsTree` query ("really the stub"), or the run stops before any test. The stub answers only the routes the client uses: anything else is 501, and a merge endpoint or a GraphQL mutation is 500, each logged as a violation the specs check for. Its control API plays the owner (merge, close, CI and deploy results, the live version).
 - **Guards in CI:** a grep fails if `ACCESS_TEST_JWKS` or `GITHUB_API_BASE` appears in `wrangler.jsonc`. `deploy.yml` never writes `.dev.vars`, and `wrangler deploy` never uploads it. A fixture test seeds a draft and checks its text and image keys never appear in `posts.json`, the RSS feed, the sitemap, the search index or a PR body. A bundle check keeps TipTap out of public chunks.
 - **Production checks** after each auth change are in the hosting guide runbook (§5 and §6).
 

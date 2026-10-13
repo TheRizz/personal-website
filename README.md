@@ -28,6 +28,14 @@ the localhost-only test key for the admin e2e tests, which the build copies (to 
 `pnpm e2e:keys && pnpm build && CI=true pnpm e2e`). Before the first `pnpm e2e`, install the browser
 with `pnpm exec playwright install chromium`.
 
+`pnpm e2e` also starts a local GitHub stub on `127.0.0.1` at `E2E_GITHUB_PORT`, which defaults to
+`E2E_PORT` + 1000 (5173, the `pnpm dev` port, so stop the dev server or set `E2E_GITHUB_PORT`).
+The `.dev.vars` that `pnpm e2e:keys` writes points `GITHUB_API_BASE` at it and holds a throwaway
+test App key. Local publishing always uses the stub: the Worker refuses to publish when the test
+key is set without it, and honours `GITHUB_API_BASE` on localhost only. The real App key never
+goes into `.dev.vars` or the working tree
+([hosting guide §2.10](docs/02-hosting-and-costs.md#210-github-publishing-step-107), step 5).
+
 To play, open `/games`: create a tic-tac-toe lobby and send the code or invite link to a
 friend. The game design is in [design doc §4.5](docs/01-system-design.md#45-game-service-design).
 

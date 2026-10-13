@@ -1,4 +1,5 @@
 import { data, Link } from "react-router";
+import { EditLink } from "~/components/EditLink";
 import { PostDates } from "~/components/PostDates";
 import { ReadingProgress } from "~/components/ReadingProgress";
 import { pageMeta } from "~/lib/meta";
@@ -33,6 +34,7 @@ export default function BlogPost({ loaderData: { post, newer, older } }: Route.C
           <p className="text-sm text-muted">
             <PostDates date={post.date} updated={post.updated} /> • {post.readingMinutes} min read
           </p>
+          <EditLink slug={post.slug} />
           {post.tags.length > 0 && (
             <ul aria-label="Tags" className="mt-4 flex flex-wrap justify-center gap-2">
               {post.tags.map((tag) => (

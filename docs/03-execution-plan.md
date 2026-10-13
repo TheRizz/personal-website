@@ -450,23 +450,64 @@ one-click publishing.
 > owner merges; the Done-when checks need the App and are left for the owner.
 
 ### Step 10.9: Publish from the editor
-- [ ] `worker/github.ts`: App JWT (`jose`, RS256, `iat` now − 60 s, `exp` + 9 min), installation token cached per isolate, `User-Agent`, typed calls for refs, trees, commits, pulls, GraphQL. `GITHUB_API_BASE` override on localhost only, for the e2e stub.
-- [ ] Frontmatter writer (`JSON.stringify` per value), slug generator, path allowlist, uniqueness check against `main` and open `blog/*` PRs, and the check that every figure key is `ready`.
-- [ ] `POST …/publish`: one commit (author from the plain var `GIT_AUTHOR`, the owner's no-reply address), branch and PR. The Worker never merges and never turns on auto-merge; the owner merges (§4.9.7). Publishing again while the PR is open adds a commit to the same branch, refreshes the body and comments with what changed.
-- [ ] PR title and body (§4.9.7): `Publish:`, `Update:` or `Unpublish: <title>`; an overview (URL, summary, tags, reading time, created and updated dates); the figures inline from `photos.ry-mart.com` with their alt text; "What changed" (frontmatter old → new and a section-level body summary for an update); a short review checklist.
-- [ ] Dates: republishing a published post sets `updated` to the publish day and never changes `date`. The display half shipped with Step 10.2: `blog.$slug` already shows "<date> • Updated <date>", the second part only when they differ.
-- [ ] Confirm dialog with the exposure and timing warning.
-- [ ] `GET /api/admin/posts` (one GraphQL tree query, cached by tree SHA) and Edit-from-`main` import with the `base_sha` check.
-- [ ] On `blog.$slug`, a client-only probe behind `owner_hint` that shows "Edit" linking to `/admin/posts/<slug>` with a full page load. It ships here because that route needs the import above.
+- [x] `worker/github.ts`: App JWT (`jose`, RS256, `iat` now − 60 s, `exp` + 9 min), installation token cached per isolate, `User-Agent`, typed calls for refs, trees, commits, pulls, GraphQL. `GITHUB_API_BASE` override on localhost only, for the e2e stub.
+- [x] Frontmatter writer (`JSON.stringify` per value), slug generator, path allowlist, uniqueness check against `main` and open `blog/*` PRs, and the check that every figure key is `ready`.
+- [x] `POST …/publish`: one commit (author from the plain var `GIT_AUTHOR`, the owner's no-reply address), branch and PR. The Worker never merges and never turns on auto-merge; the owner merges (§4.9.7). Publishing again while the PR is open adds a commit to the same branch, refreshes the body and comments with what changed.
+- [x] PR title and body (§4.9.7): `Publish:`, `Update:` or `Unpublish: <title>`; an overview (URL, summary, tags, reading time, created and updated dates); the figures inline from `photos.ry-mart.com` with their alt text; "What changed" (frontmatter old → new and a section-level body summary for an update); a short review checklist.
+- [x] Dates: republishing a published post sets `updated` to the publish day and never changes `date`. The display half shipped with Step 10.2: `blog.$slug` already shows "<date> • Updated <date>", the second part only when they differ.
+- [x] Confirm dialog with the exposure and timing warning.
+- [x] `GET /api/admin/posts` (one GraphQL tree query, cached by tree SHA) and Edit-from-`main` import with the `base_sha` check.
+- [x] On `blog.$slug`, a client-only probe behind `owner_hint` that shows "Edit" linking to `/admin/posts/<slug>` with a full page load. It ships here because that route needs the import above.
 
 **Done when:** Vitest with fetch fakes covers the happy path, slug collision, `base_sha` 409, token expiry, no request to a merge or auto-merge endpoint, no request body containing `OWNER_EMAIL`, and the PR title and body for a new post, an update and an unpublish. The frontmatter round-trips through `gray-matter` and `postFrontmatter`, and a republish changes `updated` but not `date`. E2E: a visitor without the cookie makes zero `/api/admin` requests (Playwright request log), the prerendered post has no admin markup, Edit appears with the cookie and test token and opens the imported draft, and without the token there is no Edit link and no uncaught exception or app-logged error (the browser's own failed-request message for `/api/admin/me` is filtered). A real test post published from production opens a PR with the overview, the owner merges it, and the post is live at `/blog/<slug>` within about 2 minutes of the merge.
 
+> **Built 2026-10-13 (Step 10.9, code only).** The production Done-whens wait for Step 10.7 (the
+> App and its secrets). Deviations from the plan: migration `0002_publish.sql` adds three columns
+> to `drafts` (`pr_action`, `pr_blob_sha`, `post_date`; it only adds, since `wrangler rollback`
+> doesn't roll back D1). Four fixed GraphQL queries do the list and status reads (the
+> `content/blog` tree probe, the posts list, the open-PR scan and the PR status); every other
+> call is REST. The client has no raw call and refuses any query with `mutation`. The committer
+> is the App's bot, looked up with `GET /app` and `GET /users/<slug>[bot]`. The installation
+> token is minted for `personal-website` only with exactly the four permissions publishing uses,
+> and the grant is checked. `OWNER_EMAIL` is checked in every outgoing text before the first
+> write, after NFKC and after undoing character references, percent-encoding, zero-width
+> characters and backslash escapes (twice, for double encodings), and again in every request URL
+> and body at send time. Old values that contain it are printed as "(contains a private
+> address)", so an edit that removes a leak can publish. `GIT_AUTHOR` must be a no-reply address
+> other than the owner's. A new endpoint, `POST /api/admin/posts/:slug/import`, imports a post
+> from `main` (`{}`) or loads the GitHub version after a `changed_on_github` 409
+> (`{refresh: true, baseRev}`), keeping the old text as a `conflict` revision. Posts with
+> `draft: true`, a frontmatter `slug` that differs from the file name, or a file that is binary,
+> too large or doesn't parse are listed but not editable. The posts list is cached by the
+> `content/blog` tree OID behind a probe query. Frontmatter on `main` is parsed with
+> `js-yaml@3.15.2`, gray-matter's own version. The public Edit link probes `/api/admin/me` with
+> `HEAD`, so the owner's e-mail never reaches a public page. Publish, unpublish and cancel run
+> under `ctx.waitUntil`, and a first publish or an unpublish that fails after creating its branch
+> closes the PR and deletes the branch. Publishing refuses to run when the e2e test key is set
+> without the local GitHub stub. `pnpm e2e:keys` now also writes the stub's `GITHUB_API_BASE` and
+> a throwaway test App, private key included, to `.dev.vars`.
+
 ### Step 10.10: Publish status, cancel and unpublish
-- [ ] `GET …/status` (one GraphQL PR query, the deploy run for the merge SHA, `/api/health`) and the timeline in the editor: PR opened → CI running → waiting for your review → merged → deploying → Live, with links. A PR closed without a merge puts the draft back to Draft.
-- [ ] CI failed: "Fix and republish" or "Cancel" (closes the PR, deletes the branch). Deploy failed: link to the run.
-- [ ] Unpublish (a `sha: null` tree entry through the same PR flow). Images get `published = 1` when Live.
+- [x] `GET …/status` (one GraphQL PR query, the deploy run for the merge SHA, `/api/health`) and the timeline in the editor: PR opened → CI running → waiting for your review → merged → deploying → Live, with links. A PR closed without a merge puts the draft back to Draft.
+- [x] CI failed: "Fix and republish" or "Cancel" (closes the PR, deletes the branch). Deploy failed: link to the run.
+- [x] Unpublish (a `sha: null` tree entry through the same PR flow). Images get `published = 1` when Live.
 
 **Done when:** e2e against the GitHub stub walks every stage (the stub plays the owner's merge), including a CI failure and a PR closed on GitHub. In production, a deliberately broken post shows "CI failed" with a working link, Cancel closes the PR and deletes the branch, and the test post from Step 10.9 is unpublished through an `Unpublish:` PR the owner merges, and returns 404.
+
+> **Built 2026-10-13 (Step 10.10, code only).** Deviations from the plan: production reads the
+> live version in-process from the Worker's own `__APP_VERSION__` instead of fetching
+> `/api/health`; with the local stub it reads `GET <stub>/__e2e/health`. A merge is Live when
+> that version is the merge SHA, or a later commit that contains it (`compare` says `ahead` or
+> `identical`), or when the `deploy.yml` run for the merge SHA succeeded. A cancelled deploy run
+> (superseded in the concurrency group) shows "deploying", not "deploy failed". Images get
+> `published = 1` at the first poll that sees the merge, in the same D1 batch, from the merged
+> file's text (every `publish` revision when the text isn't available), not at Live. The `ci`
+> result comes from GitHub Actions' check suite (App id 15368) on the PR head, which needs only
+> Checks read; verify that filter at the 10.9 production check. Status acts only on a PR whose
+> head branch, head repo and base match D1, and a missing repository is 503 with no D1 write. A
+> PR closed on GitHub also has its branch deleted, so it can't be reopened and merged behind
+> D1's back. Unpublish works for any post file on `main`, including ones the editor can't edit,
+> and leaves the post's images in R2 (hosting guide §6).
 
 ### Step 10.11: Hardening
 - [ ] Draft privacy fixture test: a seeded draft's text and image keys never appear in `posts.json`, RSS, the sitemap, the search index or a PR body.

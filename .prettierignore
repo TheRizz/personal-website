@@ -8,3 +8,5 @@ build/
 # emphasis where Prettier would write `_`; the golden fixtures must stay byte for byte.
 content/blog/
 packages/content-markdown/src/fixtures/
+# Pull request bodies the publishing code writes (golden files), and Markdown it reads.
+apps/web/app/lib/publish/fixtures/

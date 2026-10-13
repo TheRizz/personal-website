@@ -137,7 +137,7 @@ export async function requireOwner(
   if (kind === "variant") return refuse("non-canonical path");
 
   const testKeys = env.ACCESS_TEST_JWKS;
-  if (testKeys && !LOCAL_HOSTS.has(url.hostname)) {
+  if (testKeys && !isLocalHost(url.hostname)) {
     console.error(`ALERT: the e2e test key is configured on ${url.hostname}; refusing all admin`);
     return notFound(isApi);
   }
@@ -189,6 +189,11 @@ function isSameOriginWrite(request: Request, siteOrigin: string): boolean {
   const isUpload =
     request.method === "PUT" && new URL(request.url).pathname.startsWith("/api/admin/images/");
   return isUpload && mediaType.startsWith("image/");
+}
+
+/** Whether `hostname` (a URL's `hostname`) is this machine, where test-only settings are honoured. */
+export function isLocalHost(hostname: string): boolean {
+  return LOCAL_HOSTS.has(hostname);
 }
 
 /** Adds the admin headers (no caching, no indexing, no framing) to a response. */

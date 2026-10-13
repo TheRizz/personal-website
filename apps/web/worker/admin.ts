@@ -3,6 +3,7 @@ import type { Owner } from "./admin-auth";
 import { jsonError, methodNotAllowed } from "./api";
 import { handleDrafts } from "./drafts";
 import { handleImages } from "./images";
+import { handlePublishing } from "./publish";
 
 // The admin router. index.ts mounts it behind `requireOwner`, so it only ever sees requests from
 // the owner on an exact admin path; no route here checks access itself.
@@ -22,6 +23,12 @@ export const ADMIN_API_ROUTES = [
   { method: "POST", path: "/api/admin/images" },
   { method: "PUT", path: `${IMAGE}/480` },
   { method: "POST", path: "/api/admin/images/published" },
+  { method: "POST", path: `${DRAFT}/publish` },
+  { method: "GET", path: `${DRAFT}/status` },
+  { method: "POST", path: `${DRAFT}/cancel` },
+  { method: "GET", path: "/api/admin/posts" },
+  { method: "POST", path: "/api/admin/posts/example/import" },
+  { method: "POST", path: "/api/admin/posts/example/unpublish" },
 ] as const;
 
 /** Admin page paths, also walked by the route-auth test. */
@@ -33,12 +40,16 @@ export const ADMIN_PAGES = ["/admin", "/admin/drafts/example", "/admin/posts/exa
  */
 const OWNER_HINT = `${OWNER_HINT_COOKIE}=1; Path=/; Max-Age=86400; Secure; SameSite=Lax`;
 
-/** Routes an owner request: /api/admin/* here, admin pages to React Router (`renderPage`). */
+/**
+ * Routes an owner request: /api/admin/* here, admin pages to React Router (`renderPage`). `ctx`
+ * lets publishing finish its GitHub and D1 writes even if the client goes away.
+ */
 export async function handleAdmin(
   request: Request,
   env: Env,
   owner: Owner,
   renderPage: () => Promise<Response>,
+  ctx: ExecutionContext,
 ): Promise<Response> {
   const { pathname } = new URL(request.url);
   if (!pathname.startsWith("/api/")) return renderPage();
@@ -51,5 +62,7 @@ export async function handleAdmin(
   if (drafts) return drafts;
   const images = await handleImages(request, env);
   if (images) return images;
+  const publishing = await handlePublishing(request, env, ctx);
+  if (publishing) return publishing;
   return jsonError(404, "not_found", "No such API route.");
 }

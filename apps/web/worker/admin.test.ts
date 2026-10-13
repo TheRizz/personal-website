@@ -39,7 +39,7 @@ beforeAll(async () => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
-const ctx = {} as ExecutionContext;
+const ctx = { waitUntil() {}, passThroughOnException() {} } as unknown as ExecutionContext;
 const fetchWorker = (request: Request) =>
   worker.fetch(request as Parameters<typeof worker.fetch>[0], env, ctx);
 
@@ -101,6 +101,34 @@ describe("admin route table", () => {
     const response = await fetchWorker(adminRequest("GET", "/api/admin/nope", token));
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ error: { code: "not_found" } });
+  });
+});
+
+describe("publishing", () => {
+  it("refuses GITHUB_API_BASE on the real host before any GitHub request", async () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const keysFetch = vi.mocked(globalThis.fetch);
+    const calls = keysFetch.mock.calls.length;
+    const stubbed = {
+      ...env,
+      GIT_AUTHOR: "TheRizz <19941577+TheRizz@users.noreply.github.com>",
+      GITHUB_API_BASE: "http://127.0.0.1:5173",
+    } as Env;
+    const response = await worker.fetch(
+      adminRequest("GET", "/api/admin/posts", token) as Parameters<typeof worker.fetch>[0],
+      stubbed,
+      ctx,
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ error: { code: "github_unavailable" } });
+    expect(error).toHaveBeenCalledWith(
+      "ALERT: GITHUB_API_BASE is configured on ry-mart.com; refusing to publish",
+    );
+    // Only the gate's own key fetch, if any; nothing went to GitHub or the stub.
+    expect(keysFetch.mock.calls.slice(calls).map(([url]) => String(url))).not.toContainEqual(
+      expect.stringMatching(/github|127\.0\.0\.1/),
+    );
+    error.mockRestore();
   });
 });
 
