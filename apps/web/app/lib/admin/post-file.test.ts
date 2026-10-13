@@ -40,6 +40,69 @@ describe("postFile", () => {
     expect(meta.cover).toBe("blog/x.webp");
   });
 
+  it("writes the keys in a fixed order, with bare dates", () => {
+    const file = postFile({ ...draft, category: "notes", cover: "blog/x.webp" }, "2026-10-11", {
+      updated: "2026-10-14",
+    });
+    if (!file.ok) throw new Error(file.errors.join());
+    expect(file.content).toBe(
+      [
+        "---",
+        'title: "Durable Objects: a \\"first\\" look"',
+        'summary: "What I learned building the game lobby."',
+        "date: 2026-10-11",
+        "updated: 2026-10-14",
+        'category: "notes"',
+        'tags: ["durable-objects","true"]',
+        'cover: "blog/x.webp"',
+        "---",
+        "",
+        "## Why",
+        "",
+        "Because *fun*.",
+        "",
+      ].join("\n"),
+    );
+  });
+
+  it("round-trips `updated` through gray-matter and keeps `date`", () => {
+    for (const updated of [undefined, "2026-10-14"]) {
+      const file = postFile(draft, "2026-10-11", { updated });
+      if (!file.ok) throw new Error(file.errors.join());
+      expect(file.filename).toBe("2026-10-11-durable-objects-a-first-look.md");
+      const meta = postFrontmatter.parse(matter(file.content).data);
+      expect(meta.date.toISOString().slice(0, 10)).toBe("2026-10-11");
+      expect(meta.updated?.toISOString().slice(0, 10)).toBe(updated);
+      expect(file.content.includes("updated:")).toBe(updated !== undefined);
+      expect(file.content).not.toMatch(/^(slug|draft):/m);
+    }
+  });
+
+  it("keeps the path of a post on main whose file name doesn't match its date", () => {
+    const path = "content/blog/2026-10-11-foo.md";
+    const file = postFile({ ...draft, slug: "foo" }, "2026-10-09", { updated: "2026-10-13", path });
+    if (!file.ok) throw new Error(file.errors.join());
+    expect(file.filename).toBe("2026-10-11-foo.md");
+    expect(file.path).toBe(path);
+    const meta = postFrontmatter.parse(matter(file.content).data);
+    expect(meta.date.toISOString().slice(0, 10)).toBe("2026-10-09");
+  });
+
+  it("refuses dates that aren't real and slugs that aren't valid", () => {
+    expect(postFile(draft, "2026-02-30")).toEqual({
+      ok: false,
+      errors: ["The date must be a real date written as YYYY-MM-DD."],
+    });
+    expect(postFile(draft, "2026-10-11", { updated: "14/10/2026" })).toEqual({
+      ok: false,
+      errors: ["The updated date must be a real date written as YYYY-MM-DD."],
+    });
+    for (const slug of ["Not A Slug", "", "a".repeat(81)]) {
+      const file = postFile({ ...draft, slug }, "2026-10-11");
+      expect(file.ok).toBe(false);
+    }
+  });
+
   it("says what is missing", () => {
     const file = postFile({ ...draft, title: " ", summary: "", bodyMd: "" }, "2026-10-12");
     expect(file).toEqual({

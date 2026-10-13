@@ -1,14 +1,16 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
-// Fails when any page outside /admin loads the editor (TipTap/ProseMirror) or the Markdown
-// bridge (design doc §4.9.3). Reads the React Router manifest of the client build, then follows
-// every static import of the entry and of each public route. Lazy imports (`import(...)`) are not
-// followed: those load only when a page asks for them.
+// Fails when any page outside /admin loads the editor (TipTap/ProseMirror), the Markdown bridge
+// or the admin API wrapper `adminFetch` (design doc §4.9.1, §4.9.3). The public Edit link probes
+// /api/admin/me with its own fetch, so nothing public needs the admin client. Reads the React
+// Router manifest of the client build, then follows every static import of the entry and of each
+// public route. Lazy imports (`import(...)`) are not followed: those load only when a page asks
+// for them.
 
 const ASSETS = new URL("../apps/web/build/client/assets/", import.meta.url).pathname;
-/** Strings only the editor and the bridge contain. */
-const MARKERS = [/ProseMirror/, /isn't supported by the editor/];
+/** Strings only the editor, the bridge and `adminFetch` (`app/lib/admin/api.ts`) contain. */
+const MARKERS = [/ProseMirror/, /isn't supported by the editor/, /adminFetch is for/];
 
 interface ManifestEntry {
   module: string;
@@ -58,4 +60,4 @@ if (problems.length > 0) {
   console.error("Public pages load admin-only code:\n" + problems.map((p) => `  ${p}`).join("\n"));
   process.exit(1);
 }
-console.log(`Checked ${publicEntries.length} public entries: no editor or bridge code.`);
+console.log(`Checked ${publicEntries.length} public entries: no editor, bridge or admin API code.`);

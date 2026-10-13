@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+export { WORDS_PER_MINUTE, readingMinutes } from "./reading-time";
+
 // Zod's optional JIT probes `new Function`, which the site's CSP blocks and reports as a
 // violation (the admin editor uses this schema in the browser). Parsing works the same without it.
 z.config({ jitless: true });

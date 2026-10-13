@@ -24,8 +24,10 @@ import {
   type Revision,
 } from "~/lib/admin/drafts";
 import { figureSrcs, markImagesPublished } from "~/lib/admin/images";
-import { localDate, normalizeTags, postFile } from "~/lib/admin/post-file";
+import { normalizeTags, postFile } from "~/lib/admin/post-file";
+import { fileDates, metaOf, type DraftMeta } from "~/lib/admin/publish";
 import { Preview } from "./Preview";
+import { PublishButton, PublishPanel, usePublishing } from "./PublishPanel";
 import { RichEditor } from "./RichEditor";
 
 // The draft editor (design doc §4.9.3, execution plan Step 10.5). Loaded with React.lazy from
@@ -122,6 +124,11 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
     return copy && copy.rev === loaded.rev && !sameFields(copy.fields, loaded) ? copy : null;
   });
   const [revisions, setRevisions] = useState<Revision[] | null>(null);
+  // Where the draft stands with GitHub; publishing and its status polls update it.
+  const [meta, setMeta] = useState<DraftMeta>(() => metaOf(loaded));
+  const bodySection = useRef<HTMLElement>(null);
+  // Bumped by "Fix and republish" to move the focus to the body once it is on screen.
+  const [focusRequest, setFocusRequest] = useState(0);
 
   const fields = useMemo<DraftFields>(
     () => ({
@@ -188,6 +195,7 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
       };
       baseline.current = serverFields;
       saver.reset(next.rev, serverFields);
+      setMeta(metaOf(next));
       localCopy.clear(next.id);
     },
     [saver],
@@ -270,7 +278,44 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
     setMode("rich");
   };
 
-  const file = postFile({ ...fields, slug: loaded.slug, cover: loaded.cover }, localDate());
+  // The body may be in the Preview tab on a phone, and the rich editor mounts a moment later.
+  useEffect(() => {
+    if (focusRequest === 0) return;
+    let frame = 0;
+    let tries = 0;
+    const focus = () => {
+      const body = bodySection.current?.querySelector<HTMLElement>('[role="textbox"], textarea');
+      if (body) body.focus();
+      else if (++tries < 30) frame = requestAnimationFrame(focus);
+    };
+    focus();
+    return () => cancelAnimationFrame(frame);
+  }, [focusRequest]);
+
+  const focusBody = useCallback(() => {
+    setPhoneTab("write");
+    setFocusRequest((n) => n + 1);
+  }, []);
+
+  const publishing = usePublishing({
+    id,
+    initialStatus: loaded.status,
+    meta,
+    onMeta: setMeta,
+    saver,
+    fields,
+    cover: loaded.cover,
+    reload,
+    focusBody,
+  });
+
+  // The file publishing would commit: a post on `main` keeps its date and gets `updated`, and keeps
+  // its path, whose name may not match that date.
+  const dates = fileDates(meta);
+  const file = postFile({ ...fields, slug: meta.slug, cover: loaded.cover }, dates.date, {
+    ...(dates.updated !== undefined && { updated: dates.updated }),
+    ...(meta.kind === "edit" && meta.sourcePath !== null && { path: meta.sourcePath }),
+  });
 
   // The file may be committed by hand from here, so its images must outlive this draft: discarding
   // it and the daily clean-up skip published images (design doc §4.9.6).
@@ -312,8 +357,10 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
   const discard = async () => {
     if (!window.confirm("Discard this draft and its revisions? This can't be undone.")) return;
     try {
-      saver.dispose();
       await discardDraft(id);
+      // Only once the draft is gone: if the discard is refused (a publish is under way) or
+      // fails, autosave carries on, with the result of any save that was under way.
+      saver.dispose();
       localCopy.clear(id);
       navigate("/admin");
     } catch (error) {
@@ -369,6 +416,7 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
             <Trash2 aria-hidden="true" />
             Discard
           </button>
+          <PublishButton publishing={publishing} />
         </div>
       </div>
 
@@ -445,6 +493,7 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
           </button>
         </p>
       )}
+      <PublishPanel publishing={publishing} />
 
       <MetadataPanel
         title={title}
@@ -477,7 +526,7 @@ export default function DraftEditor({ draft: loaded }: { draft: Draft }) {
 
       <div className="grid gap-6 lg:grid-cols-2">
         {showWrite && (
-          <section aria-label="Body" className="min-w-0 space-y-3">
+          <section ref={bodySection} aria-label="Body" className="min-w-0 space-y-3">
             <div role="tablist" aria-label="Body editor" className="flex gap-1">
               {(["rich", "raw"] as const).map((tab) => (
                 <button
@@ -665,7 +714,7 @@ function RevisionsDialog({
     manual: "Saved",
     publish: "Published",
     restore: "Restored",
-    conflict: "Replaced by another tab",
+    conflict: "Replaced",
   };
   return (
     <dialog

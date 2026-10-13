@@ -85,7 +85,8 @@ export default {
     const owner = await requireOwner(request, env);
     let response: Response;
     if (owner instanceof Response) response = owner;
-    else if (owner) response = withAdminHeaders(await handleAdmin(request, env, owner, renderPage));
+    else if (owner)
+      response = withAdminHeaders(await handleAdmin(request, env, owner, renderPage, ctx));
     else response = await route(request, env, renderPage);
     // `owner` is null only for a path that isn't admin; a refusal gets the admin policy too.
     return withSecurityHeaders(request, response, nonce, owner !== null);

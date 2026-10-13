@@ -61,8 +61,14 @@
   // Cloudflare Access for the admin area (hosting guide §2.7); neither value is secret. If either
   // is empty or malformed, the owner gate refuses every admin request. The owner's e-mail is the
   // OWNER_EMAIL secret, never a var.
+  //
+  // GIT_AUTHOR is the author of every commit the editor publishes: the owner's GitHub no-reply
+  // identity, because commits are public history (design doc §4.9.7). It is never OWNER_EMAIL, and
+  // publishing refuses to run if it holds that address. The App's own key, client id and
+  // installation id are Worker secrets.
   "vars": {
     "ACCESS_TEAM_DOMAIN": "https://tight-boat-6333.cloudflareaccess.com",
     "ACCESS_AUD": "7ae08ee40e3b5eb832ad77322d4cf20f0459d08490194adedb349dd6a963a31f",
+    "GIT_AUTHOR": "TheRizz <19941577+TheRizz@users.noreply.github.com>",
   },
 }

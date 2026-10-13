@@ -15,7 +15,8 @@ const MAX_REQUEST_BYTES = MAX_BODY_BYTES + 64 * 1024;
 /** Revisions kept per draft, `publish` ones aside (those are kept forever). */
 export const REVISION_CAP = 50;
 
-const DRAFT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+/** A draft id, as the server makes them (`crypto.randomUUID()`). */
+export const DRAFT_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ROUTE = /^\/api\/admin\/drafts(?:\/([^/]+)(?:\/(revisions)(?:\/([^/]+)\/(restore))?)?)?$/;
 
 /** Reasons a save may ask for a snapshot. `publish` and `restore` are written by the server. */
@@ -44,6 +45,8 @@ interface DraftRow {
   rev: number;
   status: string;
   pr_number: number | null;
+  pr_action: string | null;
+  post_date: string | null;
   created_at: number;
   updated_at: number;
   published_at: number | null;
@@ -51,7 +54,7 @@ interface DraftRow {
 
 const DRAFT_COLUMNS =
   "id, kind, source_path, slug, title, summary, category, tags, cover_key, body_md, rev, status, " +
-  "pr_number, created_at, updated_at, published_at";
+  "pr_number, pr_action, post_date, created_at, updated_at, published_at";
 
 /** A draft as the API returns it. */
 function toDraft(row: DraftRow) {
@@ -69,6 +72,8 @@ function toDraft(row: DraftRow) {
     rev: row.rev,
     status: row.status,
     prNumber: row.pr_number,
+    prAction: row.pr_action,
+    postDate: row.post_date,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     publishedAt: row.published_at,
@@ -169,7 +174,7 @@ async function getDraft(db: D1Database, id: string): Promise<Response> {
 }
 
 /** The row as a revision of `rev`, if the row is still at that rev. */
-function snapshot(db: D1Database, id: string, rev: number, reason: string, now: number) {
+export function snapshot(db: D1Database, id: string, rev: number, reason: string, now: number) {
   return db
     .prepare(
       "INSERT INTO draft_revisions (draft_id, rev, title, body_md, meta, reason, created_at) " +
@@ -207,7 +212,7 @@ function keepRevision(db: D1Database, id: string, rev: number, reason: string, n
  * nothing once another save has moved the row on, and that save marks against its own body. A
  * mention is the id anywhere in the body, so an image is kept rather than lost on a near miss.
  */
-function markImages(db: D1Database, id: string, rev: number, now: number) {
+export function markImages(db: D1Database, id: string, rev: number, now: number) {
   return [
     db
       .prepare(
@@ -412,7 +417,7 @@ async function restoreRevision(
 }
 
 /** The request body as a JSON object, or the error response. */
-async function readJson(request: Request): Promise<Record<string, unknown> | Response> {
+export async function readJson(request: Request): Promise<Record<string, unknown> | Response> {
   const length = Number(request.headers.get("Content-Length") ?? "0");
   if (length > MAX_REQUEST_BYTES) return tooLarge();
   const bytes = await request.arrayBuffer();
