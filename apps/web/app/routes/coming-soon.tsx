@@ -6,7 +6,6 @@ import type { Route } from "./+types/coming-soon";
 const SECTIONS: Record<string, { title: string; description: string }> = {
   "/resume": { title: "Resume", description: "Work history, skills and projects." },
   "/snippets": { title: "Snippets", description: "Small pieces of code worth keeping." },
-  "/photos": { title: "Photos", description: "A gallery of photos, grouped into albums." },
   "/search": { title: "Search", description: "Search posts, snippets and photos." },
 };
 

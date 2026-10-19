@@ -4,6 +4,7 @@ import { handleAdmin } from "./admin";
 import { requireOwner, withAdminHeaders } from "./admin-auth";
 import { handleApi } from "./api";
 import { cleanUpImages } from "./images";
+import { cleanUpPhotos } from "./photos";
 import {
   SECURITY_HEADERS,
   adminContentSecurityPolicy,
@@ -92,8 +93,10 @@ export default {
     return withSecurityHeaders(request, response, nonce, owner !== null);
   },
 
-  // The only cron (wrangler.jsonc `triggers`): the daily clean-up of abandoned image uploads.
+  // The only cron (wrangler.jsonc `triggers`): the daily clean-up of abandoned image and photo
+  // uploads.
   async scheduled(controller, env, ctx) {
     ctx.waitUntil(cleanUpImages(env, controller.scheduledTime));
+    ctx.waitUntil(cleanUpPhotos(env, controller.scheduledTime));
   },
 } satisfies ExportedHandler<Env>;

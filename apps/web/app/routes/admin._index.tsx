@@ -1,4 +1,4 @@
-import { FilePen, Plus } from "lucide-react";
+import { FilePen, Images, Plus } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { PageHeading } from "~/components/PageHeading";
@@ -63,15 +63,21 @@ export default function Drafts() {
         <PageHeading title="Drafts">
           Posts you're working on. Only you can see this page.
         </PageHeading>
-        <button
-          type="button"
-          className={primaryButton}
-          disabled={creating}
-          onClick={() => void newPost()}
-        >
-          <Plus aria-hidden="true" />
-          New post
-        </button>
+        <div className="flex flex-wrap gap-2">
+          <Link to="/admin/photos" className={secondaryButton}>
+            <Images aria-hidden="true" />
+            Manage photos
+          </Link>
+          <button
+            type="button"
+            className={primaryButton}
+            disabled={creating}
+            onClick={() => void newPost()}
+          >
+            <Plus aria-hidden="true" />
+            New post
+          </button>
+        </div>
       </div>
       {error && (
         <p
