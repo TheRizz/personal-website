@@ -15,7 +15,7 @@ import { jsonError, methodNotAllowed } from "./api";
 /** The largest file one upload may store. */
 export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
 /** The tallest image a client may announce. Widths are capped by `MAX_FIGURE_WIDTH`. */
-const MAX_IMAGE_HEIGHT = 16384;
+export const MAX_IMAGE_HEIGHT = 16384;
 /** The most figure keys one request may mark as published. */
 const MAX_PUBLISHED_SRCS = 200;
 /** The largest JSON request; 200 figure keys fit easily. */
@@ -84,10 +84,10 @@ export async function handleImages(request: Request, env: ImagesEnv): Promise<Re
   return uploadVariant(request, env, id, Number(width));
 }
 
-const isExt = (value: unknown): value is ImageExt =>
+export const isExt = (value: unknown): value is ImageExt =>
   typeof value === "string" && Object.hasOwn(MEDIA_TYPES, value);
 
-const isDimension = (value: unknown, max: number): value is number =>
+export const isDimension = (value: unknown, max: number): value is number =>
   Number.isSafeInteger(value) && (value as number) >= 1 && (value as number) <= max;
 
 /**
@@ -139,11 +139,8 @@ async function uploadVariant(
   id: string,
   width: number,
 ): Promise<Response> {
-  const length = request.headers.get("Content-Length");
-  if (length === null || !/^[0-9]+$/.test(length)) {
-    return jsonError(411, "length_required", "Send the image with a Content-Length.");
-  }
-  if (Number(length) > MAX_IMAGE_BYTES) return tooLarge();
+  const refused = checkUploadLength(request);
+  if (refused) return refused;
 
   const row = await env.DB.prepare(
     "SELECT ext, width, published, draft_id FROM images WHERE id = ?",
@@ -161,33 +158,11 @@ async function uploadVariant(
     return jsonError(409, "published", "This image is published, so it can't be replaced.");
   }
 
-  const bytes = new Uint8Array(await request.arrayBuffer());
-  if (bytes.byteLength > MAX_IMAGE_BYTES) return tooLarge();
-  const type = sniffImage(bytes);
-  if (type === null) return unsupported("Only JPEG, PNG, WebP and GIF images can be uploaded.");
-  if (type !== row.ext) {
-    return unsupported(
-      `The file is ${TYPE_NAMES[type]}, but this image is ${TYPE_NAMES[row.ext]}.`,
-    );
-  }
-  const scan = scanImage(bytes, type);
-  if (scan === "metadata") {
-    return jsonError(
-      415,
-      "image_metadata",
-      "The file carries metadata such as EXIF or XMP, which can include a location.",
-    );
-  }
-  if (scan === "malformed") return unsupported(`The file isn't a complete ${TYPE_NAMES[type]}.`);
+  const bytes = await readImageUpload(request, row.ext);
+  if (bytes instanceof Response) return bytes;
 
   const key = variantKey(src, width);
-  await env.PHOTOS.put(key, bytes, {
-    httpMetadata: {
-      contentType: MEDIA_TYPES[type],
-      cacheControl: "public, max-age=31536000, immutable",
-      contentDisposition: "inline",
-    },
-  });
+  await putImageObject(env.PHOTOS, key, bytes, row.ext);
 
   // In one batch, so concurrent PUTs of other widths can't lose each other's width. The bytes
   // count a width once, however often it is put. The CASTs keep widths integers: a number may be
@@ -219,6 +194,64 @@ async function uploadVariant(
     return imageNotFound();
   }
   return Response.json({ state: current.state }, { headers: noStore });
+}
+
+/**
+ * 411 without a numeric Content-Length, 413 when it is over the limit, otherwise null. Checked
+ * before anything else, so an oversized upload is refused without being read.
+ */
+export function checkUploadLength(request: Request): Response | null {
+  const length = request.headers.get("Content-Length");
+  if (length === null || !/^[0-9]+$/.test(length)) {
+    return jsonError(411, "length_required", "Send the image with a Content-Length.");
+  }
+  if (Number(length) > MAX_IMAGE_BYTES) return tooLarge();
+  return null;
+}
+
+/**
+ * The uploaded bytes, when they are an image of type `expected` with no metadata; otherwise the
+ * refusal (413, or 415 for another type, metadata or a broken file).
+ */
+export async function readImageUpload(
+  request: Request,
+  expected: ImageExt,
+): Promise<Uint8Array | Response> {
+  const bytes = new Uint8Array(await request.arrayBuffer());
+  if (bytes.byteLength > MAX_IMAGE_BYTES) return tooLarge();
+  const type = sniffImage(bytes);
+  if (type === null) return unsupported("Only JPEG, PNG, WebP and GIF images can be uploaded.");
+  if (type !== expected) {
+    return unsupported(
+      `The file is ${TYPE_NAMES[type]}, but this image is ${TYPE_NAMES[expected]}.`,
+    );
+  }
+  const scan = scanImage(bytes, type);
+  if (scan === "metadata") {
+    return jsonError(
+      415,
+      "image_metadata",
+      "The file carries metadata such as EXIF or XMP, which can include a location.",
+    );
+  }
+  if (scan === "malformed") return unsupported(`The file isn't a complete ${TYPE_NAMES[type]}.`);
+  return bytes;
+}
+
+/** Stores checked image bytes at a public key, with immutable caching. */
+export async function putImageObject(
+  bucket: R2Bucket,
+  key: string,
+  bytes: Uint8Array,
+  type: ImageExt,
+): Promise<void> {
+  await bucket.put(key, bytes, {
+    httpMetadata: {
+      contentType: MEDIA_TYPES[type],
+      cacheControl: "public, max-age=31536000, immutable",
+      contentDisposition: "inline",
+    },
+  });
 }
 
 /**
@@ -316,7 +349,7 @@ export async function deleteImages(env: ImagesEnv, images: StoredImage[]): Promi
 }
 
 /** The request body as a small JSON object, or the error response. */
-async function readJson(request: Request): Promise<Record<string, unknown> | Response> {
+export async function readJson(request: Request): Promise<Record<string, unknown> | Response> {
   const tooLong = () => jsonError(413, "too_large", "The request is too large.");
   if (Number(request.headers.get("Content-Length") ?? "0") > MAX_JSON_BYTES) return tooLong();
   const bytes = await request.arrayBuffer();

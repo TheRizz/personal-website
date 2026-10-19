@@ -156,6 +156,16 @@ from the nav yet.
 
 ## Phase 5: Photos
 
+> **Changed 2026-10-19.** The owner chose to add photos from a phone, so they are uploaded at
+> `/admin/photos` instead of with a local script, and they live in D1 (`photos` table, migration
+> `0003_photos.sql`) instead of `photos.yaml`. A saved photo is on `/photos` at once, with no PR:
+> the Worker renders that page from D1 on each request, so it isn't prerendered. Uploads reuse the
+> editor's pipeline (Step 10.6): re-encoded in the browser, sniffed and refused with metadata by the
+> Worker, stored at `photos/<id>-<width>.<ext>` with immutable caching. Each photo has an optional
+> plain-text caption shown under it and optional alt text (the caption stands in when it is empty).
+> Albums, tags, the placeholder colour and the lightbox below are not built yet, and Step 6's search
+> index would have to read photos from D1 at build time or skip them.
+
 ### Step 5.1: Photo upload script
 - [ ] `scripts/photos-upload.ts`: takes a folder plus `--album` and `--tags`. Uses `sharp` to strip EXIF GPS data, make WebP variants at 480, 1024 and 2048 px, and compute the dominant colour. Uploads to R2 through the S3-compatible API with immutable cache headers. Adds entries to `photos.yaml`.
 - [ ] Idempotent: re-running skips ids that are already uploaded.

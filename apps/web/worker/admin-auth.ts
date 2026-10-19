@@ -186,8 +186,10 @@ function isSameOriginWrite(request: Request, siteOrigin: string): boolean {
   if (request.method === "DELETE") return true;
   const mediaType = headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase() ?? "";
   if (mediaType === "application/json") return true;
+  const { pathname } = new URL(request.url);
   const isUpload =
-    request.method === "PUT" && new URL(request.url).pathname.startsWith("/api/admin/images/");
+    request.method === "PUT" &&
+    (pathname.startsWith("/api/admin/images/") || pathname.startsWith("/api/admin/photos/"));
   return isUpload && mediaType.startsWith("image/");
 }
 

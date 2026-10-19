@@ -3,6 +3,7 @@ import type { Owner } from "./admin-auth";
 import { jsonError, methodNotAllowed } from "./api";
 import { handleDrafts } from "./drafts";
 import { handleImages } from "./images";
+import { handlePhotos } from "./photos";
 import { handlePublishing } from "./publish";
 
 // The admin router. index.ts mounts it behind `requireOwner`, so it only ever sees requests from
@@ -11,6 +12,7 @@ import { handlePublishing } from "./publish";
 /** Every admin API route. Later steps add theirs, and the route-auth test walks this table. */
 const DRAFT = "/api/admin/drafts/00000000-0000-4000-8000-000000000000";
 const IMAGE = "/api/admin/images/00000000-0000-4000-8000-000000000000";
+const PHOTO = "/api/admin/photos/00000000-0000-4000-8000-000000000000";
 export const ADMIN_API_ROUTES = [
   { method: "GET", path: "/api/admin/me" },
   { method: "GET", path: "/api/admin/drafts" },
@@ -29,10 +31,20 @@ export const ADMIN_API_ROUTES = [
   { method: "GET", path: "/api/admin/posts" },
   { method: "POST", path: "/api/admin/posts/example/import" },
   { method: "POST", path: "/api/admin/posts/example/unpublish" },
+  { method: "GET", path: "/api/admin/photos" },
+  { method: "POST", path: "/api/admin/photos" },
+  { method: "PUT", path: `${PHOTO}/480` },
+  { method: "PATCH", path: PHOTO },
+  { method: "DELETE", path: PHOTO },
 ] as const;
 
 /** Admin page paths, also walked by the route-auth test. */
-export const ADMIN_PAGES = ["/admin", "/admin/drafts/example", "/admin/posts/example"] as const;
+export const ADMIN_PAGES = [
+  "/admin",
+  "/admin/drafts/example",
+  "/admin/posts/example",
+  "/admin/photos",
+] as const;
 
 /**
  * Marks a browser that has signed in, so public pages probe /api/admin/me only for it. It is a
@@ -62,6 +74,8 @@ export async function handleAdmin(
   if (drafts) return drafts;
   const images = await handleImages(request, env);
   if (images) return images;
+  const photos = await handlePhotos(request, env);
+  if (photos) return photos;
   const publishing = await handlePublishing(request, env, ctx);
   if (publishing) return publishing;
   return jsonError(404, "not_found", "No such API route.");

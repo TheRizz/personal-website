@@ -282,7 +282,7 @@ function draw(
 }
 
 /** The error for a refused request, with the server's message when it sent one. */
-function refusal(status: number, body: string): ApiError {
+export function refusal(status: number, body: string): ApiError {
   let error: { code?: string; message?: string } | undefined;
   try {
     error = (JSON.parse(body) as { error?: typeof error }).error;
@@ -297,7 +297,7 @@ function refusal(status: number, body: string): ApiError {
 }
 
 /** PUTs one variant with XMLHttpRequest, since fetch() can't report upload progress. */
-function putVariant(
+export function putVariant(
   path: string,
   blob: Blob,
   contentType: string,
