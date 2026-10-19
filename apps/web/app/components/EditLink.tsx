@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import { hasOwnerHint } from "~/lib/admin/owner-hint";
 
-// The Edit link on public posts (design doc §4.9.1). It renders nothing on the server and on the
-// first client render, so prerendered HTML has no admin markup; a probe in the browser decides.
+// The Edit link on public posts (design doc §4.9.1), and the owner probe it shares with the
+// header's admin menu. Both render nothing on the server and on the first client render, so
+// prerendered HTML has no admin markup; a probe in the browser decides.
 // Only a browser with the owner hint asks, and it asks with HEAD, so the owner's e-mail never
 // reaches a public page, where the analytics beacon runs too. Don't import ~/lib/admin/api here:
 // `pnpm check:bundle` fails if adminFetch reaches a public page.
@@ -33,17 +34,33 @@ export async function probeOwner(cookie: string, signal?: AbortSignal): Promise<
   }
 }
 
-/** "Edit" on a published post, linking to its draft, for the signed-in owner only. */
-export function EditLink({ slug }: { slug: string }) {
+/** One probe per page load, shared by the Edit link and the header's admin menu. */
+let ownerProbe: Promise<boolean> | null = null;
+
+/**
+ * False on the server and on the first client render, then the answer of `probeOwner`. Signing in
+ * or out is a full page load, so the shared answer never outlives the session it describes.
+ */
+export function useOwner(): boolean {
   const [owner, setOwner] = useState(false);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void probeOwner(document.cookie, controller.signal).then((yes) => {
-      if (!controller.signal.aborted) setOwner(yes);
+    let active = true;
+    ownerProbe ??= probeOwner(document.cookie);
+    void ownerProbe.then((yes) => {
+      if (active) setOwner(yes);
     });
-    return () => controller.abort();
+    return () => {
+      active = false;
+    };
   }, []);
+
+  return owner;
+}
+
+/** "Edit" on a published post, linking to its draft, for the signed-in owner only. */
+export function EditLink({ slug }: { slug: string }) {
+  const owner = useOwner();
 
   if (!owner) return null;
   return (

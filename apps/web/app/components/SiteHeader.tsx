@@ -1,5 +1,6 @@
 import { Mail } from "lucide-react";
 import { Link, NavLink } from "react-router";
+import { AdminMenu } from "./AdminMenu";
 import { site } from "~/site";
 import { GitHubIcon } from "./icons";
 import { IconGroup, iconButtonClass } from "./IconButton";
@@ -9,7 +10,7 @@ import { ThemeToggle } from "./ThemeToggle";
 export function SiteHeader() {
   return (
     <header className="mb-8 border-b border-line pb-4">
-      <div className="flex items-center justify-between gap-2">
+      <div className="relative flex items-center justify-between gap-2">
         <Link
           to="/"
           className="-ml-2 rounded-lg px-2 py-1 text-[1.35rem] leading-none font-extrabold tracking-[-0.03em] transition duration-200 ease-spring active:scale-95 sm:text-[1.6rem]"
@@ -17,6 +18,7 @@ export function SiteHeader() {
           {site.name}
         </Link>
         <div className="flex items-center gap-1.5 sm:gap-2">
+          <AdminMenu />
           <IconGroup label="Elsewhere">
             <a
               href={site.github}
