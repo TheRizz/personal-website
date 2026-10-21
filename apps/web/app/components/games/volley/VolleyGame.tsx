@@ -201,6 +201,12 @@ function SetupScreen({
   const two = hasPlayerTwo(setup);
   const anyCpu = controllers(setup).includes("cpu");
   const modes = MODES[setup.format];
+  // The page is prerendered: until the game's code has loaded, a tap on Start would do nothing.
+  const ready = useSyncExternalStore(
+    subscribeNothing,
+    () => true,
+    () => false,
+  );
   return (
     <div className="space-y-4">
       <div className={`${card} space-y-6`}>
@@ -248,7 +254,7 @@ function SetupScreen({
           />
           {setup.court === "jungle" && (
             <p className="mt-2 text-sm text-muted">
-              Watch out for the monkey swinging along the top. The ball bounces off him.
+              A monkey walks along the roof. Pass him the ball and he spikes it at the other side.
             </p>
           )}
         </div>
@@ -273,7 +279,12 @@ function SetupScreen({
             onChange={(p2) => update({ p2 })}
           />
         )}
-        <button type="button" onClick={onStart} className={`${primaryButton} w-full`}>
+        <button
+          type="button"
+          onClick={onStart}
+          disabled={!ready}
+          className={`${primaryButton} w-full`}
+        >
           <Play aria-hidden="true" />
           Start match
         </button>
@@ -321,6 +332,7 @@ function OverlayCard({ title, children }: { title: string; children: ReactNode }
 }
 
 function MatchScreen({ setup, onQuit }: { setup: Setup; onQuit: () => void }) {
+  const overlay = useRef<HTMLDivElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLCanvasElement>(null);
   const [round, setRound] = useState(0);
@@ -349,13 +361,39 @@ function MatchScreen({ setup, onQuit }: { setup: Setup; onQuit: () => void }) {
     return () => window.removeEventListener("touchstart", onTouch);
   }, []);
 
-  // The page behind the full-screen court shouldn't scroll.
+  // The page behind the full-screen court shouldn't scroll. On iPhones, holding a button must not
+  // start a text selection (with its copy menu) anywhere on the page, which CSS alone doesn't stop:
+  // touches on the court and the buttons cancel the browser's own touch handling. Pointer events,
+  // which the buttons use, still arrive.
   useEffect(() => {
     const root = document.documentElement;
-    const previous = root.style.overflow;
-    root.style.overflow = "hidden";
+    const locked = {
+      overflow: "hidden",
+      "user-select": "none",
+      "-webkit-user-select": "none",
+      "-webkit-touch-callout": "none",
+    };
+    const previous = Object.keys(locked).map((name) => [name, root.style.getPropertyValue(name)]);
+    for (const [name, value] of Object.entries(locked)) root.style.setProperty(name, value);
+    window.getSelection()?.removeAllRanges();
+
+    const element = overlay.current!;
+    const cancel = (event: Event) => event.preventDefault();
+    const cancelGameTouch = (event: TouchEvent) => {
+      if (event.target instanceof Element && event.target.closest("[data-game-touch]")) {
+        event.preventDefault();
+      }
+    };
+    document.addEventListener("selectstart", cancel);
+    element.addEventListener("contextmenu", cancel);
+    element.addEventListener("touchstart", cancelGameTouch, { passive: false });
+    element.addEventListener("touchmove", cancelGameTouch, { passive: false });
     return () => {
-      root.style.overflow = previous;
+      for (const [name, value] of previous) root.style.setProperty(name!, value!);
+      document.removeEventListener("selectstart", cancel);
+      element.removeEventListener("contextmenu", cancel);
+      element.removeEventListener("touchstart", cancelGameTouch);
+      element.removeEventListener("touchmove", cancelGameTouch);
     };
   }, []);
 
@@ -489,7 +527,8 @@ function MatchScreen({ setup, onQuit }: { setup: Setup; onQuit: () => void }) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-white select-none"
+      ref={overlay}
+      className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-white select-none [-webkit-touch-callout:none]"
       data-testid="volley-match"
     >
       <div className="flex h-12 shrink-0 items-center justify-between px-3">
@@ -530,6 +569,7 @@ function MatchScreen({ setup, onQuit }: { setup: Setup; onQuit: () => void }) {
             ref={canvas}
             role="img"
             aria-label="Volleyball court"
+            data-game-touch
             className="touch-none rounded-lg"
           />
         </div>

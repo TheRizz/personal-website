@@ -5,10 +5,12 @@ import {
   BALL_R,
   GROUND_Y,
   NET_X,
+  MONKEY_Y,
   NO_INPUT,
   PLAYER_R,
   bodyCenter,
   createMatch,
+  otherSide,
   playerBounds,
   serverOf,
   step,
@@ -171,15 +173,27 @@ describe("the court", () => {
     }
   });
 
-  it("knocks the ball off the monkey", () => {
-    const match = newMatch(2, "jungle", 0);
-    match.monkey = { x: 200, y: 90, dir: 1, time: 0 };
-    inPlay(match, 205, 30, 0);
-    match.ball.vy = 400;
-    const events = run(match, (batch) => batch.some((event) => event.type === "monkey-hit"), 1);
-    expect(events).toContainEqual({ type: "monkey-hit" });
-    expect(match.ball.vy).toBeLessThan(0);
-  });
+  it.each([0, 1] as const)(
+    "has the monkey catch a ball side %i passes him and spike it at the other side",
+    (passer) => {
+      const match = newMatch(2, "jungle", 0);
+      match.monkey = { x: 300, y: MONKEY_Y, dir: 1, time: 0, holding: null, target: 0, rest: 0 };
+      inPlay(match, 300, MONKEY_Y + 60, passer, 2);
+      match.ball.vy = -400;
+      const events = run(match, (batch) => batch.some((e) => e.type === "monkey-spike"), 2);
+      expect(events).toContainEqual({ type: "monkey-catch" });
+      expect(events).toContainEqual({ type: "monkey-spike", target: otherSide(passer) });
+      // The receiving side starts afresh with three touches.
+      expect(match.ball).toMatchObject({ lastSide: passer, touches: 0 });
+
+      // Aimed at the player on the target side.
+      const victim = match.players[otherSide(passer)]!;
+      const before = Math.abs(match.ball.x - victim.x);
+      for (let i = 0; i < 20; i++) step(match, [NO_INPUT, NO_INPUT]);
+      expect(Math.abs(match.ball.x - victim.x)).toBeLessThan(before);
+      expect(match.ball.vy).toBeGreaterThan(0);
+    },
+  );
 });
 
 describe("the computer player", () => {

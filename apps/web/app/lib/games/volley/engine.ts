@@ -38,9 +38,16 @@ export const SERVE_Y = 205;
 const SERVE_WAIT = 10;
 const POINT_PAUSE = 1.4;
 
-/** The jungle monkey: swings along the top of the court and knocks the ball about. */
+/**
+ * The jungle monkey walks along the roof of the court. Pass him the ball and he catches it and
+ * spikes it at the other side: at the nearest player who didn't send it to him.
+ */
 export const MONKEY_R = 24;
-const MONKEY_SPEED = 150;
+/** Height of his middle, hanging under the roof beam. */
+export const MONKEY_Y = 44;
+const MONKEY_SPEED = 110;
+const MONKEY_HOLD = 0.35;
+const MONKEY_SPIKE_SPEED = 900;
 
 export type Side = 0 | 1;
 export const otherSide = (side: Side): Side => (side === 0 ? 1 : 0);
@@ -92,9 +99,15 @@ export interface Ball {
 export interface Monkey {
   x: number;
   y: number;
-  /** +1 swinging right, -1 left. */
+  /** +1 walking right, -1 left. */
   dir: number;
   time: number;
+  /** Seconds left holding a caught ball before he spikes it; null when his hands are free. */
+  holding: number | null;
+  /** The side he'll spike at. */
+  target: Side;
+  /** Seconds before he can catch again, so a ball he just spiked doesn't come straight back. */
+  rest: number;
 }
 
 export type RallyEnd = "ground" | "touches" | "serve";
@@ -144,7 +157,8 @@ export type GameEvent =
   | { type: "net" }
   | { type: "wall" }
   | { type: "monkey-arrives" }
-  | { type: "monkey-hit" }
+  | { type: "monkey-catch" }
+  | { type: "monkey-spike"; target: Side }
   | { type: "rally-over"; winner: Side; reason: RallyEnd; scored: boolean }
   | { type: "win"; winner: Side };
 
@@ -407,6 +421,8 @@ function moveBall(match: Match, dt: number, events: GameEvent[]) {
     ball.vy = 0;
     return;
   }
+  // In the monkey's hands.
+  if (match.monkey?.holding != null) return;
   const wasLeft = ball.x < NET_X;
   ball.vy += BALL_GRAVITY * dt;
   ball.x += ball.vx * dt;
@@ -432,23 +448,64 @@ function moveBall(match: Match, dt: number, events: GameEvent[]) {
   }
 }
 
-/** The monkey's height at a point of its swing along the top of the court. */
-export const monkeyY = (time: number) => 78 + Math.sin(time * 2.4) * 26;
+/** The monkey throws the ball he's holding at the nearest player on his target side. */
+function monkeySpike(match: Match, monkey: Monkey, events: GameEvent[]) {
+  const { ball } = match;
+  const targets = teamOf(match, monkey.target);
+  const victim = targets.reduce((best, player) =>
+    Math.abs(player.x - monkey.x) < Math.abs(best.x - monkey.x) ? player : best,
+  );
+  // Aimed at the top of their head, along a short arc.
+  const aimX = victim.x;
+  const aimY = victim.y - PLAYER_R * 2 - BALL_R;
+  const t = Math.max(0.25, Math.hypot(aimX - ball.x, aimY - ball.y) / MONKEY_SPIKE_SPEED);
+  ball.vx = (aimX - ball.x) / t;
+  ball.vy = (aimY - ball.y - 0.5 * BALL_GRAVITY * t * t) / t;
+  // The passer's side gets the credit: the other side starts with three touches.
+  ball.lastSide = otherSide(monkey.target);
+  ball.touches = 0;
+  ball.serving = false;
+  events.push({ type: "monkey-spike", target: monkey.target });
+}
 
 function updateMonkey(match: Match, dt: number, events: GameEvent[]) {
   if (match.court !== "jungle") return;
   const monkey = match.monkey;
+  const { ball } = match;
   if (monkey) {
     monkey.time += dt;
+    if (monkey.holding !== null) {
+      if (match.phase.kind !== "rally") {
+        monkey.holding = null;
+        return;
+      }
+      ball.x = monkey.x + monkey.dir * 4;
+      ball.y = monkey.y + MONKEY_R + BALL_R - 8;
+      monkey.holding -= dt;
+      if (monkey.holding <= 0) {
+        monkey.holding = null;
+        monkey.rest = 0.6;
+        monkeySpike(match, monkey, events);
+      }
+      return;
+    }
+    monkey.rest = Math.max(0, monkey.rest - dt);
     monkey.x += monkey.dir * MONKEY_SPEED * dt;
-    monkey.y = monkeyY(monkey.time);
     if (monkey.x < -MONKEY_R * 2 || monkey.x > COURT_W + MONKEY_R * 2) {
       match.monkey = null;
       match.nextMonkey = 6 + random(match) * 8;
       return;
     }
-    if (match.ball.live && bounceOffCircle(match.ball, monkey.x, monkey.y, MONKEY_R, 0.9)) {
-      events.push({ type: "monkey-hit" });
+    const reach = MONKEY_R + BALL_R;
+    const caught = Math.hypot(ball.x - monkey.x, ball.y - monkey.y) < reach;
+    if (caught && ball.live && match.phase.kind === "rally" && monkey.rest <= 0) {
+      monkey.holding = MONKEY_HOLD;
+      // At the side that didn't pass it to him; a ball nobody touched goes at the far side.
+      const passer = ball.lastSide ?? (ball.x < NET_X ? 0 : 1);
+      monkey.target = otherSide(passer);
+      ball.vx = 0;
+      ball.vy = 0;
+      events.push({ type: "monkey-catch" });
     }
     return;
   }
@@ -458,9 +515,12 @@ function updateMonkey(match: Match, dt: number, events: GameEvent[]) {
   const dir = random(match) < 0.5 ? 1 : -1;
   match.monkey = {
     x: dir > 0 ? -MONKEY_R * 2 : COURT_W + MONKEY_R * 2,
-    y: monkeyY(0),
+    y: MONKEY_Y,
     dir,
     time: 0,
+    holding: null,
+    target: 0,
+    rest: 0,
   };
   events.push({ type: "monkey-arrives" });
 }

@@ -44,8 +44,11 @@ export function playEvent(event: GameEvent) {
       tone(900, 0.12, "sawtooth", 0.05, 1.5);
       setTimeout(() => tone(1100, 0.12, "sawtooth", 0.05, 1.4), 130);
       break;
-    case "monkey-hit":
-      tone(700, 0.1, "square", 0.08, 0.6);
+    case "monkey-catch":
+      tone(1200, 0.08, "sawtooth", 0.05, 1.3);
+      break;
+    case "monkey-spike":
+      tone(260, 0.16, "square", 0.12, 0.5);
       break;
     case "rally-over":
       if (event.scored) {
