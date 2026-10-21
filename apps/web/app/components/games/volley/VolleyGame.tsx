@@ -166,19 +166,14 @@ function CharacterPicker({
             />
             <span className="flex cursor-pointer flex-col items-center gap-1.5 rounded-xl border border-line bg-bg px-2 py-2.5 text-sm font-semibold text-muted transition peer-checked:border-fg peer-checked:text-fg peer-focus-visible:ring-2 peer-focus-visible:ring-fg/40 hover:text-fg">
               <svg viewBox="0 0 40 36" aria-hidden="true" className="h-8 w-9">
-                <ellipse
-                  cx="20"
-                  cy="19"
-                  rx="17"
-                  ry="16"
+                <path
+                  d="M20 3C30 3 35 13 35 22C35 30 29 33 20 33C11 33 5 30 5 22C5 13 10 3 20 3Z"
                   fill={character.color}
-                  stroke={character.shade}
+                  stroke="#000"
                   strokeWidth="2.5"
                 />
-                <circle cx="14" cy="14" r="3.6" fill="#fff" />
-                <circle cx="26" cy="14" r="3.6" fill="#fff" />
-                <circle cx="15" cy="14.5" r="1.8" fill="#0f172a" />
-                <circle cx="27" cy="14.5" r="1.8" fill="#0f172a" />
+                <circle cx="16" cy="14" r="2.2" fill="#000" />
+                <circle cx="24" cy="14" r="2.2" fill="#000" />
               </svg>
               {character.name}
             </span>
