@@ -10,3 +10,5 @@ content/blog/
 packages/content-markdown/src/fixtures/
 # Pull request bodies the publishing code writes (golden files), and Markdown it reads.
 apps/web/app/lib/publish/fixtures/
+# Vendored third-party Claude skill (Leonxlnx/taste-skill), kept byte for byte with upstream.
+.claude/skills/

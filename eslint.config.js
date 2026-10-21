@@ -14,6 +14,8 @@ export default tseslint.config(
       "apps/web/app/generated/",
       "playwright-report/",
       "test-results/",
+      // Vendored third-party Claude skill, kept byte for byte with upstream.
+      ".claude/skills/",
     ],
   },
   js.configs.recommended,
