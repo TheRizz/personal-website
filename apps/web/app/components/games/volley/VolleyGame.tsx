@@ -201,6 +201,12 @@ function SetupScreen({
   const two = hasPlayerTwo(setup);
   const anyCpu = controllers(setup).includes("cpu");
   const modes = MODES[setup.format];
+  // The page is prerendered: until the game's code has loaded, a tap on Start would do nothing.
+  const ready = useSyncExternalStore(
+    subscribeNothing,
+    () => true,
+    () => false,
+  );
   return (
     <div className="space-y-4">
       <div className={`${card} space-y-6`}>
@@ -273,7 +279,12 @@ function SetupScreen({
             onChange={(p2) => update({ p2 })}
           />
         )}
-        <button type="button" onClick={onStart} className={`${primaryButton} w-full`}>
+        <button
+          type="button"
+          onClick={onStart}
+          disabled={!ready}
+          className={`${primaryButton} w-full`}
+        >
           <Play aria-hidden="true" />
           Start match
         </button>
