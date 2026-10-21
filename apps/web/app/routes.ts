@@ -9,6 +9,7 @@ export default [
   route("games", "routes/games.tsx"),
   route("games/tictactoe", "routes/games.tictactoe.tsx"),
   route("games/tictactoe/:code", "routes/games.tictactoe.$code.tsx"),
+  route("games/volley", "routes/games.volley.tsx"),
   // Owner only, behind the owner gate (design doc §4.9.2). Never prerendered.
   route("admin", "routes/admin.tsx", [
     index("routes/admin._index.tsx"),
