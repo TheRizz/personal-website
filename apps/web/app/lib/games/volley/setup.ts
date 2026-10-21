@@ -48,8 +48,8 @@ export const DEFAULT_SETUP: Setup = {
   level: "normal",
   court: "beach",
   target: 11,
-  p1: "blaze",
-  p2: "rio",
+  p1: "rio",
+  p2: "blaze",
 };
 
 /** A saved setup, or the default for anything missing or unknown. */
