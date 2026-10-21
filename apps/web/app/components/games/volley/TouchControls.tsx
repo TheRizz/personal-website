@@ -37,6 +37,7 @@ function MovePad({ onChange, label }: { onChange: Hold; label: string }) {
   return (
     <div
       role="group"
+      data-game-touch
       aria-label={`${label} move`}
       className={`${surface} h-20 w-44 justify-between px-2 landscape:h-16 landscape:w-28 landscape:px-0.5`}
       onPointerDown={(event) => {
@@ -73,6 +74,7 @@ function JumpButton({ onChange, label }: { onChange: Hold; label: string }) {
   return (
     <div
       role="button"
+      data-game-touch
       aria-label={`${label} jump`}
       aria-pressed={held}
       className={`${surface} size-20 transition-transform landscape:size-18 ${held ? "scale-95 bg-slate-900/55" : ""}`}

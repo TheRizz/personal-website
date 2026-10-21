@@ -5,6 +5,7 @@ import {
   GROUND_Y,
   MAX_TOUCHES,
   MONKEY_R,
+  MONKEY_Y,
   NET_HALF_W,
   NET_TOP,
   NET_X,
@@ -132,7 +133,7 @@ function drawJungle(ctx: CanvasRenderingContext2D) {
   ctx.fillStyle = "#713f12";
   ctx.fillRect(4, 0, 22, GROUND_Y);
   ctx.fillRect(COURT_W - 26, 0, 22, GROUND_Y);
-  // The canopy and its hanging vines along the top, where the monkey swings.
+  // The canopy and its hanging vines along the top.
   ctx.fillStyle = "#14532d";
   ctx.beginPath();
   ctx.moveTo(0, 0);
@@ -147,6 +148,12 @@ function drawJungle(ctx: CanvasRenderingContext2D) {
     ctx.quadraticCurveTo(x + 8, 60, x - 4, 70 + ((x * 7) % 50));
     ctx.stroke();
   }
+  // The bamboo roof beam the monkey walks along.
+  ctx.fillStyle = "#a3a33a";
+  ctx.fillRect(0, 0, COURT_W, 12);
+  ctx.fillStyle = "#6b6b1f";
+  ctx.fillRect(0, 10, COURT_W, 3);
+  for (let x = 40; x < COURT_W; x += 80) ctx.fillRect(x, 0, 3, 12);
   sand(ctx, "#a16207", "#854d0e");
 }
 
@@ -303,25 +310,37 @@ function drawMonkey(ctx: CanvasRenderingContext2D, match: Match) {
   const monkey = match.monkey;
   if (!monkey) return;
   const { x, y, dir } = monkey;
-  // The vine it hangs from.
-  ctx.strokeStyle = "#166534";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(x - dir * 30, 0);
-  ctx.lineTo(x + dir * 6, y - MONKEY_R + 2);
-  ctx.stroke();
+  const holding = monkey.holding !== null;
+  const swing = Math.sin(monkey.time * 9);
+  ctx.lineCap = "round";
   // Tail.
   ctx.strokeStyle = "#78350f";
   ctx.lineWidth = 5;
-  ctx.lineCap = "round";
   ctx.beginPath();
-  ctx.moveTo(x - dir * 16, y + 14);
-  ctx.quadraticCurveTo(x - dir * 44, y + 20, x - dir * 38, y - 4 + Math.sin(monkey.time * 6) * 4);
+  ctx.moveTo(x - dir * 14, y + 14);
+  ctx.quadraticCurveTo(x - dir * 40, y + 24, x - dir * 36, y + 2 + Math.sin(monkey.time * 6) * 4);
   ctx.stroke();
-  // Arm up to the vine.
+  // Arms: hand over hand along the roof beam, or down around a caught ball.
+  ctx.lineWidth = 6;
   ctx.beginPath();
-  ctx.moveTo(x + dir * 8, y - 8);
-  ctx.lineTo(x + dir * 6, y - MONKEY_R + 2);
+  if (holding) {
+    for (const side of [-1, 1]) {
+      ctx.moveTo(x + side * 12, y + 4);
+      ctx.lineTo(x + side * 16 + dir * 4, y + MONKEY_R + 6);
+    }
+  } else {
+    ctx.moveTo(x - 8, y - 8);
+    ctx.lineTo(x - 12 + swing * 8, MONKEY_Y - MONKEY_R - 14);
+    ctx.moveTo(x + 8, y - 8);
+    ctx.lineTo(x + 12 - swing * 8, MONKEY_Y - MONKEY_R - 14);
+  }
+  ctx.stroke();
+  // Legs dangling.
+  ctx.beginPath();
+  ctx.moveTo(x - 7, y + 16);
+  ctx.lineTo(x - 9 - swing * 3, y + 30);
+  ctx.moveTo(x + 7, y + 16);
+  ctx.lineTo(x + 9 + swing * 3, y + 30);
   ctx.stroke();
   // Ears, head-body and face.
   ctx.fillStyle = "#92400e";
@@ -346,7 +365,8 @@ function drawMonkey(ctx: CanvasRenderingContext2D, match: Match) {
   ctx.strokeStyle = "#1c1917";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.arc(x + dir * 3, y + 5, 4, 0.2, Math.PI - 0.2);
+  if (holding) ctx.arc(x + dir * 3, y + 7, 4, Math.PI + 0.3, -0.3);
+  else ctx.arc(x + dir * 3, y + 5, 4, 0.2, Math.PI - 0.2);
   ctx.stroke();
 }
 

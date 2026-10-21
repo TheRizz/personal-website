@@ -77,4 +77,33 @@ test.describe("on an iPhone", () => {
     expect(court!.width).toBeLessThanOrEqual(390);
     expect(errors).toEqual([]);
   });
+
+  test("holding the buttons can't select text on the page", async ({ page }) => {
+    await page.goto("/games/volley");
+    await page.getByRole("button", { name: "Start match" }).click();
+    const root = page.locator("html");
+    await expect(root).toHaveCSS("user-select", "none");
+
+    // The browser's own handling of a touch on a button (selection, magnifier, copy menu) is
+    // cancelled, and a selection can't start anywhere.
+    const cancelled = await page.getByRole("button", { name: "Player jump" }).evaluate((button) => {
+      const touch = new Touch({ identifier: 1, target: button, clientX: 10, clientY: 10 });
+      const event = new TouchEvent("touchstart", {
+        touches: [touch],
+        targetTouches: [touch],
+        changedTouches: [touch],
+        bubbles: true,
+        cancelable: true,
+      });
+      button.dispatchEvent(event);
+      const select = new Event("selectstart", { bubbles: true, cancelable: true });
+      document.body.dispatchEvent(select);
+      return [event.defaultPrevented, select.defaultPrevented];
+    });
+    expect(cancelled).toEqual([true, true]);
+
+    // Back on the page, text can be selected again.
+    await page.getByRole("button", { name: "Quit match" }).click();
+    await expect(root).not.toHaveCSS("user-select", "none");
+  });
 });
