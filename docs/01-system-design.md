@@ -266,6 +266,7 @@ otherwise free-form, lowercase and kebab-case.
 | `/games` | prerender shell | List of available games |
 | `/games/tictactoe` | prerender | Create or join lobby |
 | `/games/tictactoe/:code` | server, on demand | Live game (shareable link). A malformed code is a 404, a lowercase code redirects. |
+| `/games/volley` | prerender | Power Volley: real-time side-view volleyball after Powa Volley Classic, played in the browser only (vs the computer or on one device), so it doesn't use the lobby. Rules in `apps/web/app/lib/games/volley/`. |
 | `/admin`, `/admin/drafts/:id`, `/admin/posts/:slug` | client, owner only | Never prerendered. Data comes only from `/api/admin/*`. Anyone else gets the Access login or a 404 (§4.9). |
 | `/rss.xml`, `/sitemap.xml`, `/robots.txt` | static | |
 

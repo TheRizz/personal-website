@@ -10,6 +10,7 @@ const STATIC_ROUTES = [
   "/snippets",
   "/games",
   "/games/tictactoe",
+  "/games/volley",
   "/search",
 ];
 
