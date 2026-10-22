@@ -1,7 +1,7 @@
 name: backup
 
-# Nightly export of the drafts database into the private R2 bucket blog-backups (design doc
-# §4.9.5). Actions logs on a public repo are public, so nothing here prints database content:
+# Nightly export of the drafts database (design doc §4.9.5) and the Pipeline Tycoon saves
+# (docs/04-pipeline-tycoon.md §2.4) into the private R2 bucket blog-backups. Actions logs on a public repo are public, so nothing here prints database content:
 # wrangler writes the export to a file, and only its size is logged.
 
 on:
@@ -50,15 +50,17 @@ jobs:
       - if: steps.credentials.outputs.ready == 'true'
         run: pnpm install --frozen-lockfile --filter web
 
-      - name: Export the database
+      - name: Export the databases
         if: steps.credentials.outputs.ready == 'true'
         working-directory: apps/web
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.BACKUP_D1_TOKEN }}
         run: |
-          pnpm exec wrangler d1 export blog --remote --output "$RUNNER_TEMP/blog.sql" > /dev/null
-          gzip -9 "$RUNNER_TEMP/blog.sql"
-          echo "Export size: $(stat -c %s "$RUNNER_TEMP/blog.sql.gz") bytes"
+          for db in blog tycoon; do
+            pnpm exec wrangler d1 export "$db" --remote --output "$RUNNER_TEMP/$db.sql" > /dev/null
+            gzip -9 "$RUNNER_TEMP/$db.sql"
+            echo "$db export size: $(stat -c %s "$RUNNER_TEMP/$db.sql.gz") bytes"
+          done
 
       - name: Upload to blog-backups
         if: steps.credentials.outputs.ready == 'true'
@@ -67,9 +69,12 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.BACKUP_R2_SECRET }}
           AWS_DEFAULT_REGION: auto
         run: |
-          key="d1/blog-$(date -u +%Y-%m-%dT%H%M%SZ).sql.gz"
-          aws s3 cp "$RUNNER_TEMP/blog.sql.gz" "s3://blog-backups/$key" \
-            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-            --only-show-errors
-          echo "Uploaded $key"
-          rm -f "$RUNNER_TEMP/blog.sql.gz"
+          stamp="$(date -u +%Y-%m-%dT%H%M%SZ)"
+          for db in blog tycoon; do
+            key="d1/$db-$stamp.sql.gz"
+            aws s3 cp "$RUNNER_TEMP/$db.sql.gz" "s3://blog-backups/$key" \
+              --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+              --only-show-errors
+            echo "Uploaded $key"
+            rm -f "$RUNNER_TEMP/$db.sql.gz"
+          done

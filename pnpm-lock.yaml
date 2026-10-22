@@ -232,6 +232,9 @@ importers:
       '@site/game-core':
         specifier: workspace:*
         version: link:../../packages/game-core
+      '@site/tycoon-core':
+        specifier: workspace:*
+        version: link:../../packages/tycoon-core
       '@tiptap/extensions':
         specifier: 3.31.4
         version: 3.31.4(@tiptap/core@3.31.4(@tiptap/pm@3.31.4))(@tiptap/pm@3.31.4)
@@ -256,6 +259,9 @@ importers:
       lucide-react:
         specifier: ^1.55.0
         version: 1.55.0(@types/react@19.3.0)(react@19.3.0)
+      phaser:
+        specifier: ^4.2.1
+        version: 4.2.1
       react:
         specifier: ^19.2.1
         version: 19.3.0
@@ -368,6 +374,16 @@ importers:
         version: 4.6.6
 
   packages/game-core:
+    dependencies:
+      zod:
+        specifier: ^4.6.6
+        version: 4.6.6
+    devDependencies:
+      fast-check:
+        specifier: ^4.10.2
+        version: 4.10.2
+
+  packages/tycoon-core:
     dependencies:
       zod:
         specifier: ^4.6.6
@@ -1849,6 +1865,9 @@ packages:
     resolution: {integrity: sha512-kVscqXk4OCp68SZ0dkgEKVi6/8ij300KBWTJq32P/dYeWTSwK41WyTxalN1eRmA5Z9UU/LX9D7FWSmV9SAYx6g==}
     engines: {node: '>=0.10.0'}
 
+  eventemitter3@5.0.4:
+    resolution: {integrity: sha512-mlsTRyGaPBjPedk6Bvw+aqbsXDtoAyAzm5MO7JgU+yVRyMQ5O8bD4Kcci7BS85f93veegeCPkL8R4GLClnjLFw==}
+
   exit-hook@2.2.1:
     resolution: {integrity: sha512-eNTPlAD67BmP31LDINZ3U7HSF8l57TxOY2PmBJ1shpCvpnxBF93mWCE8YHBnXs8qiUZJc9WDcWIeC3a2HIAMfw==}
     engines: {node: '>=6'}
@@ -2386,6 +2405,9 @@ packages:
 
   pathe@2.0.3:
     resolution: {integrity: sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w==}
+
+  phaser@4.2.1:
+    resolution: {integrity: sha512-WUNwCPJpdjvZiuT6SgCfYVW8Qw/3j0jJ4ws7P2QkhFLFu74sbGuyHJcbFueGkY/AYO4Pi47bNQXn1OCJeLX//w==}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
@@ -4292,6 +4314,8 @@ snapshots:
 
   esutils@2.0.3: {}
 
+  eventemitter3@5.0.4: {}
+
   exit-hook@2.2.1: {}
 
   expect-type@1.4.0: {}
@@ -4977,6 +5001,10 @@ snapshots:
   pathe@1.1.2: {}
 
   pathe@2.0.3: {}
+
+  phaser@4.2.1:
+    dependencies:
+      eventemitter3: 5.0.4
 
   picocolors@1.1.1: {}
 

@@ -14,19 +14,29 @@ interface SqliteModule {
   DatabaseSync: new (path: string) => SqliteDatabase;
 }
 
-const MIGRATIONS = import.meta.glob<string>("../migrations/*.sql", {
-  query: "?raw",
-  import: "default",
-  eager: true,
-});
+const MIGRATIONS = {
+  blog: import.meta.glob<string>("../migrations/*.sql", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }),
+  tycoon: import.meta.glob<string>("../migrations-tycoon/*.sql", {
+    query: "?raw",
+    import: "default",
+    eager: true,
+  }),
+};
 
 /** A fresh in-memory database with every migration applied, and the D1 view of it. */
-export async function createD1(): Promise<{ db: D1Database; sqlite: SqliteDatabase }> {
+export async function createD1(
+  database: keyof typeof MIGRATIONS = "blog",
+): Promise<{ db: D1Database; sqlite: SqliteDatabase }> {
   const { DatabaseSync } = (await import("node:sqlite" as string)) as SqliteModule;
   const sqlite = new DatabaseSync(":memory:");
   // D1 enforces foreign keys.
   sqlite.exec("PRAGMA foreign_keys = ON");
-  for (const file of Object.keys(MIGRATIONS).sort()) sqlite.exec(MIGRATIONS[file]!);
+  const migrations = MIGRATIONS[database];
+  for (const file of Object.keys(migrations).sort()) sqlite.exec(migrations[file]!);
 
   const statement = (sql: string, values: unknown[] = []) => {
     const bound = {

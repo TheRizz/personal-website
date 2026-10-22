@@ -37,6 +37,12 @@
       "namespace_id": "1001",
       "simple": { "limit": 10, "period": 60 },
     },
+    // POST /api/tycoon/players (a new anonymous Pipeline Tycoon player), per client IP.
+    {
+      "name": "TYCOON_PLAYER_LIMITER",
+      "namespace_id": "1002",
+      "simple": { "limit": 5, "period": 60 },
+    },
   ],
 
   // Production domain (hosting guide §2.5). www never reaches the Worker: it
@@ -55,6 +61,13 @@
       "database_name": "blog",
       "database_id": "adb4e0b8-b513-464e-bff6-4c0faab3dfa0",
       "migrations_dir": "migrations",
+    },
+    // Pipeline Tycoon saves (docs/04-pipeline-tycoon.md §2.4), kept apart from the blog.
+    {
+      "binding": "TYCOON_DB",
+      "database_name": "tycoon",
+      "database_id": "721ee66f-fd87-490a-ab79-ddf0d394c572",
+      "migrations_dir": "migrations-tycoon",
     },
   ],
 
