@@ -178,6 +178,9 @@ importers:
       '@site/content-schema':
         specifier: workspace:*
         version: link:packages/content-schema
+      '@site/tycoon-core':
+        specifier: workspace:*
+        version: link:packages/tycoon-core
       '@types/node':
         specifier: ^24.0.0
         version: 24.19.2
@@ -382,6 +385,18 @@ importers:
       fast-check:
         specifier: ^4.10.2
         version: 4.10.2
+
+  packages/pipeline-tycoon-cli:
+    devDependencies:
+      '@site/tycoon-core':
+        specifier: workspace:*
+        version: link:../tycoon-core
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.19.2
+      esbuild:
+        specifier: ^0.28.2
+        version: 0.28.2
 
   packages/tycoon-core:
     dependencies:

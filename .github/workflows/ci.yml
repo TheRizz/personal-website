@@ -74,6 +74,8 @@ jobs:
       - run: pnpm build
       # Public pages must never load the editor or the Markdown bridge.
       - run: pnpm check:bundle
+      # The CLI bundle and the exact files that would go to npm (release-cli.yml publishes them).
+      - run: pnpm --filter @rymart/pipeline-tycoon run stage
       # Requests every figure image, so only PRs that change posts depend on photos.ry-mart.com.
       - name: Check figure images
         if: github.event_name == 'pull_request'

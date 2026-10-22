@@ -6,9 +6,11 @@ import {
   overclocked,
   tierRate,
   upcomingGolden,
+  type GameEvent,
   type GameState,
+  type TycoonController,
 } from "@site/tycoon-core";
-import type { GameEvent, TycoonController } from "~/lib/games/tycoon/controller";
+
 import { TIER_COLOURS } from "./colours";
 
 // The live "factory": a dark neon schematic drawn in code (no image assets, so the CSP needs no

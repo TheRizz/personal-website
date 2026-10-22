@@ -1,21 +1,181 @@
+import { MAX_CLICKS_PER_SECOND, replay, type SaveLog } from "./replay";
 import {
-  AUTOSAVE_MS,
-  MAX_CLICKS_PER_SECOND,
+  RULES_VERSION,
   advance,
   apply,
   cloneState,
-  replay,
   type Action,
   type GameState,
-  type GoldenKind,
   type Outcome,
-} from "@site/tycoon-core";
-import { TycoonApiError, startSession, uploadSave, type ApiFailure } from "./api";
+} from "./rules";
+import type { GoldenKind } from "./golden";
+import { AUTOSAVE_MS } from "./schema";
 
-// The client side of ADR-0006. The game runs here, every frame, on `local`; every action is also
-// written to a log. Saves upload the log; the server replays it onto its own state and sends that
-// back, and `local` is rebuilt from the server's state plus whatever happened while the save was
-// in flight. So the client never holds progress the server didn't confirm for long.
+// The client side of ADR-0006, shared by the web page and the CLI so both sync exactly alike.
+//
+// TycoonClient talks to /api/tycoon/*. TycoonController runs the game: every frame on `local`,
+// every action also written to a log. Saves upload the log; the server replays it onto its own
+// state and sends that back, and `local` is rebuilt from the server's state plus whatever happened
+// while the save was in flight. So a client never holds unconfirmed progress for long.
+
+export type ApiFailure =
+  | { kind: "session_replaced" }
+  | { kind: "out_of_sync" }
+  | { kind: "update_required" }
+  | { kind: "unauthorized" }
+  | { kind: "rate_limited" }
+  | { kind: "invalid_code" }
+  | { kind: "network"; detail: string };
+
+export class TycoonApiError extends Error {
+  constructor(readonly failure: ApiFailure) {
+    super(failure.kind === "network" ? `network: ${failure.detail}` : failure.kind);
+  }
+}
+
+export interface SessionStart {
+  state: GameState;
+  session: string;
+  seq: number;
+  offline: { ms: number; earned: number };
+}
+
+export interface SaveAck {
+  state: GameState;
+  seq: number;
+  dropped: number;
+  creditedMs: number;
+}
+
+/** Where a client keeps its `<player>.<secret>` credential (localStorage, a config file…). */
+export interface CredentialStore {
+  load(): string | null;
+  save(credential: string | null): void;
+}
+
+export interface ClientOptions {
+  /** "" for same-origin (the web page), "https://ry-mart.com" for the CLI. */
+  baseUrl: string;
+  store: CredentialStore;
+  /** Which kind of device this is, recorded when it links with a code. */
+  kind: "web" | "cli";
+  fetch?: typeof fetch;
+}
+
+/** The /api/tycoon/* endpoints (apps/web/worker/tycoon-api.ts). */
+export class TycoonClient {
+  private memory: string | null = null;
+  private readonly fetcher: typeof fetch;
+
+  constructor(private readonly options: ClientOptions) {
+    this.fetcher = options.fetch ?? ((...args) => fetch(...args));
+  }
+
+  /** Whether this device has a player yet. */
+  hasPlayer(): boolean {
+    return this.credential() !== null;
+  }
+
+  private credential(): string | null {
+    return this.memory ?? this.options.store.load();
+  }
+
+  private remember(credential: string | null) {
+    this.memory = credential;
+    this.options.store.save(credential);
+  }
+
+  private async request<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    keepalive = false,
+  ): Promise<T> {
+    const auth = this.credential();
+    let response: Response;
+    try {
+      response = await this.fetcher(`${this.options.baseUrl}/api/tycoon/${path}`, {
+        method,
+        ...(keepalive ? { keepalive: true } : {}),
+        headers: {
+          ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+          ...(auth ? { Authorization: `Bearer ${auth}` } : {}),
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+    } catch (error) {
+      throw new TycoonApiError({ kind: "network", detail: String(error) });
+    }
+    if (response.ok) {
+      return (response.status === 204 ? undefined : await response.json()) as T;
+    }
+    const payload = (await response.json().catch(() => null)) as {
+      error?: { code?: string };
+    } | null;
+    const code = payload?.error?.code;
+    if (
+      code === "session_replaced" ||
+      code === "out_of_sync" ||
+      code === "update_required" ||
+      code === "invalid_code"
+    ) {
+      throw new TycoonApiError({ kind: code });
+    }
+    if (response.status === 401) throw new TycoonApiError({ kind: "unauthorized" });
+    if (response.status === 429) throw new TycoonApiError({ kind: "rate_limited" });
+    throw new TycoonApiError({ kind: "network", detail: `HTTP ${response.status}` });
+  }
+
+  private async createPlayer(): Promise<void> {
+    const { player, token } = await this.request<{ player: string; token: string }>(
+      "POST",
+      "players",
+    );
+    this.remember(`${player}.${token}`);
+  }
+
+  /** Starts a session, creating an anonymous player first if this device has none. */
+  async startSession(): Promise<SessionStart> {
+    if (!this.hasPlayer()) await this.createPlayer();
+    try {
+      return await this.request<SessionStart>("POST", "session", { v: RULES_VERSION });
+    } catch (error) {
+      // The stored player no longer exists (or the secret is wrong): start over as a new one.
+      if (error instanceof TycoonApiError && error.failure.kind === "unauthorized") {
+        this.remember(null);
+        await this.createPlayer();
+        return this.request<SessionStart>("POST", "session", { v: RULES_VERSION });
+      }
+      throw error;
+    }
+  }
+
+  /** Uploads the log since the last save. `keepalive` lets it finish while a page unloads. */
+  uploadSave(session: string, seq: number, log: SaveLog, keepalive = false): Promise<SaveAck> {
+    return this.request<SaveAck>("PUT", "save", { v: RULES_VERSION, session, seq, log }, keepalive);
+  }
+
+  /** A code another device can claim within `expiresInMs` to join this player. */
+  createPairingCode(): Promise<{ code: string; expiresInMs: number }> {
+    return this.request("POST", "pair");
+  }
+
+  /** Joins the player that showed `code`. This device's previous player is forgotten. */
+  async claimPairingCode(code: string): Promise<void> {
+    const { player, token } = await this.request<{ player: string; token: string }>(
+      "POST",
+      "pair/claim",
+      { code, client: this.options.kind },
+    );
+    this.remember(`${player}.${token}`);
+  }
+
+  /** Unlinks: the server forgets this device's secret, and so does this device. */
+  async forgetDevice(): Promise<void> {
+    if (this.hasPlayer()) await this.request("DELETE", "device");
+    this.remember(null);
+  }
+}
 
 /** Save early when the log gets this long, so a keepalive save on unload fits in 64 KB. */
 const FLUSH_AT_ACTIONS = 1_500;
@@ -43,10 +203,13 @@ export type Status =
 type Untimed = Action extends infer A ? (A extends Action ? Omit<A, "t"> : never) : never;
 
 interface Pending {
-  /** performance.now() when this log began (the last accepted save). */
+  /** `now()` when this log began (the last accepted save). */
   start: number;
   actions: Action[];
 }
+
+/** What the controller needs from a client: just the two sync calls. */
+export type Transport = Pick<TycoonClient, "startSession" | "uploadSave">;
 
 export class TycoonController {
   /** What the player sees: server state plus everything since. */
@@ -59,7 +222,8 @@ export class TycoonController {
   private session = "";
   private seq = 0;
   private pending: Pending = { start: 0, actions: [] };
-  private inflight: { start: number; elapsed: number; actions: Action[] } | null = null;
+  private inflight: Promise<void> | null = null;
+  private saveQueued = false;
   private lastTick = 0;
   private clickTokens = MAX_CLICKS_PER_SECOND;
   private nextSaveAt = 0;
@@ -68,7 +232,15 @@ export class TycoonController {
   private listeners = new Set<() => void>();
   private eventListeners = new Set<(event: GameEvent) => void>();
 
-  constructor(private readonly now: () => number = () => performance.now()) {}
+  /**
+   * @param now a monotonic clock in ms (performance.now in browsers and Node)
+   * @param wallClock for "saved at" times
+   */
+  constructor(
+    private readonly transport: Transport,
+    private readonly now: () => number = () => performance.now(),
+    private readonly wallClock: () => number = () => Date.now(),
+  ) {}
 
   /** Starts (or restarts) a session with the server. */
   async start(): Promise<void> {
@@ -76,7 +248,7 @@ export class TycoonController {
     this.status = { kind: "loading" };
     this.changed();
     try {
-      const started = await startSession();
+      const started = await this.transport.startSession();
       // A later start() superseded this one (and its session) while it was in flight.
       if (attempt !== this.startAttempt) return;
       const now = this.now();
@@ -84,7 +256,6 @@ export class TycoonController {
       this.seq = started.seq;
       this.local = started.state;
       this.pending = { start: now, actions: [] };
-      this.inflight = null;
       this.lastTick = now;
       this.clickTokens = MAX_CLICKS_PER_SECOND;
       this.nextSaveAt = now + AUTOSAVE_MS;
@@ -101,21 +272,25 @@ export class TycoonController {
     this.changed();
   }
 
-  // ---- subscriptions (React reads `version` through useSyncExternalStore) ----
+  // ---- subscriptions ----
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
-    return () => this.listeners.delete(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
   };
 
   getVersion = () => this.version;
 
   onEvent(listener: (event: GameEvent) => void) {
     this.eventListeners.add(listener);
-    return () => this.eventListeners.delete(listener);
+    return () => {
+      this.eventListeners.delete(listener);
+    };
   }
 
-  /** Tells React to re-render. Called from tick at a throttled rate and after every action. */
+  /** Tells views to redraw. Called after every action; views may also call it on a timer. */
   changed() {
     this.version++;
     for (const listener of this.listeners) listener();
@@ -209,8 +384,9 @@ export class TycoonController {
 
   catchGolden(index: number): Outcome {
     const outcome = this.act({ a: "gold", i: index });
-    if (outcome.ok && outcome.golden)
+    if (outcome.ok && outcome.golden) {
       this.emit({ type: "golden", kind: outcome.golden, earned: outcome.earned });
+    }
     return outcome;
   }
 
@@ -225,9 +401,27 @@ export class TycoonController {
 
   // ---- saving ----
 
-  /** Uploads the log. With `unloading`, uses a keepalive request and doesn't wait for the answer. */
-  async save(unloading = false): Promise<void> {
-    if (!this.playing || this.inflight) return;
+  /**
+   * Uploads the log. With `unloading`, uses a keepalive request (the page is going away). A save
+   * asked for while one is in flight runs right after it, so it is never lost.
+   */
+  save(unloading = false): Promise<void> {
+    if (!this.playing) return Promise.resolve();
+    if (this.inflight) {
+      this.saveQueued = true;
+      return this.inflight;
+    }
+    this.inflight = this.upload(unloading).finally(() => {
+      this.inflight = null;
+      if (this.saveQueued) {
+        this.saveQueued = false;
+        void this.save();
+      }
+    });
+    return this.inflight;
+  }
+
+  private async upload(unloading: boolean): Promise<void> {
     this.tick();
     const now = this.now();
     const sent = {
@@ -235,25 +429,23 @@ export class TycoonController {
       elapsed: now - this.pending.start,
       actions: this.pending.actions,
     };
-    this.inflight = sent;
     this.pending = { start: now, actions: [] };
     this.clickTokens = MAX_CLICKS_PER_SECOND;
     this.nextSaveAt = now + AUTOSAVE_MS;
     this.saving = true;
     this.changed();
     try {
-      const ack = await uploadSave(
+      const ack = await this.transport.uploadSave(
         this.session,
         this.seq,
         { elapsed: sent.elapsed, actions: sent.actions },
         unloading,
       );
       this.seq = ack.seq;
-      this.lastSavedAt = Date.now();
+      this.lastSavedAt = this.wallClock();
       if (ack.dropped > 0) this.emit({ type: "dropped", count: ack.dropped });
       // Rebuild: the server's state at the cut, plus what happened since.
       const cutoff = this.now();
-      this.tick();
       const rebuilt = replay(ack.state, {
         elapsed: cutoff - this.pending.start,
         actions: this.pending.actions,
@@ -272,11 +464,11 @@ export class TycoonController {
           ],
         };
         this.nextSaveAt = this.now() + RETRY_MS;
+        this.saveQueued = false;
       } else {
         this.stop(error);
       }
     } finally {
-      this.inflight = null;
       this.saving = false;
       this.changed();
     }

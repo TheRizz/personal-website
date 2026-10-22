@@ -21,6 +21,9 @@ beforeEach(async () => {
     TYCOON_PLAYER_LIMITER: {
       limit: async () => ({ success: limiterAllows }),
     } as unknown as RateLimit,
+    TYCOON_PAIR_LIMITER: {
+      limit: async () => ({ success: limiterAllows }),
+    } as unknown as RateLimit,
   };
 });
 
@@ -177,5 +180,68 @@ describe("saves", () => {
   it("only answers its own routes and methods", async () => {
     expect((await call("GET", "save", 0)).status).toBe(405);
     expect((await call("GET", "nope", 0)).status).toBe(404);
+  });
+});
+
+describe("pairing", () => {
+  async function pair(auth: string, now = 0) {
+    const { status, json } = await call("POST", "pair", now, undefined, auth);
+    expect(status).toBe(200);
+    return json as { code: string; expiresInMs: number };
+  }
+
+  const claim = (code: string, now = 0, client = "cli") =>
+    call("POST", "pair/claim", now, { code, client });
+
+  it("links a second device to the same player, which then plays the same save", async () => {
+    const web = await newPlayer();
+    const { code } = await pair(web);
+    expect(code).toMatch(/^[A-HJKMNP-Z2-9]{6}$/);
+
+    // Typed sloppily, as people do.
+    const claimed = await claim(` ${code.slice(0, 3).toLowerCase()}-${code.slice(3)} `);
+    expect(claimed.status).toBe(201);
+    const cli = `${claimed.json.player}.${claimed.json.token}`;
+    expect(claimed.json.player).toBe(web.split(".")[0]);
+
+    const s = await session(cli, 1_000);
+    expect(s.state.linked).toBe(true);
+    expect(s.state.achievements).toContain("works-on-my-machine");
+    // Both secrets work; the newest session wins as usual.
+    expect((await call("POST", "session", 2_000, { v: RULES_VERSION }, web)).status).toBe(200);
+  });
+
+  it("is single use and expires after 10 minutes", async () => {
+    const web = await newPlayer();
+    const first = await pair(web);
+    expect((await claim(first.code)).status).toBe(201);
+    expect((await claim(first.code)).status).toBe(404);
+
+    const second = await pair(web, 0);
+    expect((await claim(second.code, second.expiresInMs + 1)).status).toBe(404);
+  });
+
+  it("keeps one live code per player", async () => {
+    const web = await newPlayer();
+    const old = await pair(web);
+    const fresh = await pair(web);
+    expect((await claim(old.code)).status).toBe(404);
+    expect((await claim(fresh.code)).status).toBe(201);
+  });
+
+  it("is rate-limited and needs a signed-in player to create codes", async () => {
+    expect((await call("POST", "pair", 0)).status).toBe(401);
+    limiterAllows = false;
+    expect((await claim("ABCDEF")).status).toBe(429);
+  });
+
+  it("forgets a device's secret when it unlinks", async () => {
+    const web = await newPlayer();
+    const { code } = await pair(web);
+    const claimed = await claim(code);
+    const cli = `${claimed.json.player}.${claimed.json.token}`;
+    expect((await call("DELETE", "device", 0, undefined, cli)).status).toBe(204);
+    expect((await call("POST", "session", 0, { v: RULES_VERSION }, cli)).status).toBe(401);
+    expect((await call("POST", "session", 0, { v: RULES_VERSION }, web)).status).toBe(200);
   });
 });

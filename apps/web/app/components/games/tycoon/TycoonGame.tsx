@@ -16,11 +16,15 @@ import {
   generatorCost,
   migrationGain,
   nextPointAt,
+  TycoonController,
+  type GameEvent,
   type GameState,
+  type Status,
 } from "@site/tycoon-core";
 import { primaryButton, secondaryButton } from "~/components/games/ui";
-import { TycoonController, type GameEvent, type Status } from "~/lib/games/tycoon/controller";
+import { tycoonClient } from "~/lib/games/tycoon/api";
 import { TIER_HEX } from "./colours";
+import { LinkDevice } from "./LinkDevice";
 import { loadSoundOn, playEvent, saveSoundOn, unlockAudio } from "./sound";
 
 // The page: stats bar, the Phaser factory scene and the HTML shop (docs/04-pipeline-tycoon.md §1).
@@ -40,7 +44,7 @@ const UI_REFRESH_MS = 125;
 const subscribeNothing = () => () => {};
 
 export function TycoonGame() {
-  const [controller] = useState(() => new TycoonController());
+  const [controller] = useState(() => new TycoonController(tycoonClient));
   useSyncExternalStore(controller.subscribe, controller.getVersion, controller.getVersion);
   const sceneRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>("generators");
@@ -205,7 +209,7 @@ export function TycoonGame() {
 
       {controller.offline && state && (
         <Overlay>
-          <p className="font-mono text-xs tracking-widest text-cyan-300 uppercase">
+          <p className="font-mono text-xs tracking-widest text-accent uppercase">
             While you were away
           </p>
           <p className="mt-3 text-lg">
@@ -254,8 +258,8 @@ function StatsBar({
         </p>
         <p className="font-mono text-sm text-muted tabular-nums">
           {state ? `${formatShort(currentRate(state))}/s` : " "}
-          {state && state.ap > 0 && <span className="ml-3 text-violet-300">{state.ap} AP</span>}
-          {saving && <span className="ml-3 text-cyan-300/80">saving…</span>}
+          {state && state.ap > 0 && <span className="ml-3 text-accent-violet">{state.ap} AP</span>}
+          {saving && <span className="ml-3 text-accent/80">saving…</span>}
         </p>
       </div>
       <button
@@ -274,7 +278,7 @@ function UpgradeBadge({ state }: { state: GameState }) {
   const affordable = availableUpgrades(state).filter((u) => u.cost <= state.records).length;
   if (affordable === 0) return null;
   return (
-    <span className="ml-1.5 rounded-full bg-cyan-400/20 px-1.5 font-mono text-[0.7rem] text-cyan-200">
+    <span className="ml-1.5 rounded-full bg-accent/15 px-1.5 font-mono text-[0.7rem] text-accent">
       {affordable}
     </span>
   );
@@ -341,7 +345,7 @@ function GeneratorList({
                     {known ? generator.blurb : "Keep building to find out."}
                   </span>
                   <span className="font-mono text-[0.78rem] tabular-nums">
-                    <span className={canBuy ? "text-cyan-200" : "text-muted"}>
+                    <span className={canBuy ? "text-accent" : "text-muted"}>
                       {formatShort(cost)}
                     </span>
                     <span className="text-muted"> · key {(tier + 1) % 10}</span>
@@ -376,13 +380,13 @@ function UpgradeList({ controller, state }: { controller: TycoonController; stat
               disabled={!canBuy}
               onClick={() => controller.upgrade(upgrade.id)}
               className={`w-full rounded-lg border px-3 py-2 text-left transition hover:bg-surface-hover active:scale-[0.99] disabled:opacity-55 ${
-                ending ? "border-amber-300/60 bg-amber-300/5" : "border-line"
+                ending ? "border-warn/60 bg-warn/5" : "border-line"
               }`}
             >
               <span className="flex items-baseline justify-between gap-2">
                 <span className="text-[0.95rem] font-semibold">{upgrade.name}</span>
                 <span
-                  className={`font-mono text-sm tabular-nums ${canBuy ? "text-cyan-200" : "text-muted"}`}
+                  className={`font-mono text-sm tabular-nums ${canBuy ? "text-accent" : "text-muted"}`}
                 >
                   {formatShort(upgrade.cost)}
                 </span>
@@ -413,13 +417,13 @@ function MigratePanel({ controller, state }: { controller: TycoonController; sta
         <dt className="text-muted">You have</dt>
         <dd className="text-right">{state.ap} AP</dd>
         <dt className="text-muted">Migrating now gives</dt>
-        <dd className="text-right text-violet-300">+{gain} AP</dd>
+        <dd className="text-right text-accent-violet">+{gain} AP</dd>
         <dt className="text-muted">This run</dt>
         <dd className="text-right">{formatShort(state.runRecords)}</dd>
       </dl>
       <div className="mt-3">
         <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover" aria-hidden="true">
-          <div className="h-full bg-violet-400" style={{ width: `${progress * 100}%` }} />
+          <div className="h-full bg-accent-violet" style={{ width: `${progress * 100}%` }} />
         </div>
         <p className="mt-1 font-mono text-xs text-muted">
           Next point at {formatShort(next)} records this run
@@ -489,6 +493,7 @@ function StatsPanel({ controller, state }: { controller: TycoonController; state
           Save now
         </button>
       </div>
+      <LinkDevice controller={controller} />
       <h3 className="mt-5 mb-2 text-sm font-semibold">
         Achievements {state.achievements.length}/{ACHIEVEMENTS.length}
       </h3>
@@ -499,7 +504,7 @@ function StatsPanel({ controller, state }: { controller: TycoonController; state
             <li
               key={achievement.id}
               className={`rounded-md border px-2 py-1 text-[0.8rem] leading-snug ${
-                has ? "border-cyan-300/30 text-fg" : "border-line text-muted/70"
+                has ? "border-accent/40 text-fg" : "border-line text-muted/70"
               }`}
             >
               <span className="font-semibold">{has ? achievement.name : "???"}</span>
@@ -546,7 +551,7 @@ function StoppedOverlay({
             : "Couldn't reach the server.";
   return (
     <Overlay>
-      <p className="font-mono text-xs tracking-widest text-amber-300 uppercase">Pipeline halted</p>
+      <p className="font-mono text-xs tracking-widest text-warn uppercase">Pipeline halted</p>
       <p className="mt-3 text-lg">{message}</p>
       <div className="mt-5 flex gap-2">
         <button
@@ -584,7 +589,7 @@ function EndingOverlay({ onClose }: { onClose: () => void }) {
   const done = shown >= TERMINAL_LINES.length;
   return (
     <Overlay dark>
-      <p className="font-mono text-xs tracking-widest text-cyan-300 uppercase">
+      <p className="font-mono text-xs tracking-widest text-accent uppercase">
         Integration complete
       </p>
       <h2 className="mt-2 text-2xl font-bold">You integrated Earth.</h2>

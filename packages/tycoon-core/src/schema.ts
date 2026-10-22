@@ -53,8 +53,11 @@ export type SaveRequest = z.infer<typeof saveRequestSchema>;
 const count = z.number().int().min(0);
 const amount = z.number().finite().min(0);
 
-/** A stored state. Unknown upgrade ids are dropped rather than failing the whole save. */
-export const gameStateSchema: z.ZodType<GameState> = z.object({
+/**
+ * A stored state, of this RULES_VERSION or an older one (upgradeState brings it up to date).
+ * Unknown upgrade ids are dropped rather than failing the whole save.
+ */
+export const gameStateSchema: z.ZodType<GameState, unknown> = z.object({
   v: z.number().int(),
   records: amount,
   runRecords: amount,
@@ -71,13 +74,32 @@ export const gameStateSchema: z.ZodType<GameState> = z.object({
   bestRate: amount,
   overclockUntil: amount,
   ended: z.boolean(),
+  // Added in rules v2.
+  linked: z.boolean().default(false),
   golden: z.object({ seed: count, start: amount, next: count }),
 });
 
 /**
- * Brings a stored state up to the current RULES_VERSION. There is only version 1 so far; later
- * versions add a step here for each bump.
+ * Brings a stored state up to the current RULES_VERSION, one step per version.
+ *
+ * - v1 → v2: `linked` added (gameStateSchema defaults it to false); the new "Works On My Machine"
+ *   achievement is checked when the state is next used.
  */
 export function upgradeState(state: GameState): GameState {
   return { ...state, v: RULES_VERSION };
 }
+
+/** Pairing codes: 6 characters with no look-alikes (no 0/O, 1/I/L). */
+export const PAIRING_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export const PAIRING_CODE_LENGTH = 6;
+
+/** What a person typed → the stored form: " abc-234" → "ABC234". */
+export function normalisePairingCode(input: string): string {
+  return input.toUpperCase().replace(/[\s-]/g, "");
+}
+
+/** POST /api/tycoon/pair/claim body. */
+export const claimRequestSchema = z.object({
+  code: z.string().min(1).max(16),
+  client: z.enum(["web", "cli"]),
+});

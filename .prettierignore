@@ -12,3 +12,6 @@ packages/content-markdown/src/fixtures/
 apps/web/app/lib/publish/fixtures/
 # Vendored third-party Claude skill (Leonxlnx/taste-skill), kept byte for byte with upstream.
 .claude/skills/
+# The CLI bundle and its npm staging folder (packages/pipeline-tycoon-cli/stage.mjs).
+packages/pipeline-tycoon-cli/dist/
+packages/pipeline-tycoon-cli/publish/

@@ -5,14 +5,23 @@
 //   POST /api/tycoon/players   new anonymous player → { player, token }    (rate-limited per IP)
 //   POST /api/tycoon/session   start a session: offline earnings, seed      (supersedes the last)
 //   PUT  /api/tycoon/save      replay the log since the last save
+//   POST /api/tycoon/pair      a 6-character code another device can claim (10 min, single use)
+//   POST /api/tycoon/pair/claim  claim a code → { player, token } for this device (rate-limited)
+//   DELETE /api/tycoon/device  forget this device's secret (unlinking)
 //
-// Players authenticate with `Authorization: Bearer <player>.<token>`.
+// Players authenticate with `Authorization: Bearer <player>.<token>`, where the token is the
+// player's first secret or any linked device's (docs/04-pipeline-tycoon.md §3).
 
 import {
   MAX_SAVE_BYTES,
   RULES_VERSION,
+  PAIRING_CODE_ALPHABET,
+  PAIRING_CODE_LENGTH,
   applyOffline,
+  checkAchievements,
+  claimRequestSchema,
   gameStateSchema,
+  normalisePairingCode,
   newGame,
   newGoldenSeed,
   replay,
@@ -40,7 +49,16 @@ interface PlayerRow {
 }
 
 /** The parts of Env this module uses, so tests can pass just these. */
-export type TycoonEnv = Pick<Env, "TYCOON_DB" | "TYCOON_PLAYER_LIMITER">;
+export type TycoonEnv = Pick<Env, "TYCOON_DB" | "TYCOON_PLAYER_LIMITER" | "TYCOON_PAIR_LIMITER">;
+
+/** How long a pairing code works. */
+export const PAIRING_CODE_MS = 10 * 60 * 1000;
+
+interface Authenticated {
+  row: PlayerRow;
+  /** Hash of the secret this request used. */
+  tokenHash: string;
+}
 
 function base64url(bytes: Uint8Array): string {
   return btoa(String.fromCharCode(...bytes))
@@ -85,8 +103,8 @@ async function readJson(request: Request): Promise<{ body: unknown } | Response>
   }
 }
 
-/** The player row for a valid `Authorization` header, or the error response. */
-async function authenticate(request: Request, env: TycoonEnv): Promise<PlayerRow | Response> {
+/** The player for a valid `Authorization` header (first secret or a linked device's), or the error. */
+async function authenticate(request: Request, env: TycoonEnv): Promise<Authenticated | Response> {
   const header = request.headers.get("Authorization") ?? "";
   const [id = "", token = ""] = header.replace(/^Bearer\s+/i, "").split(".");
   const unauthorized = jsonError(401, "unauthorized", "Unknown player.");
@@ -96,8 +114,15 @@ async function authenticate(request: Request, env: TycoonEnv): Promise<PlayerRow
   )
     .bind(id)
     .first<PlayerRow>();
-  if (!row || !sameHash(row.token_hash, await sha256Hex(token))) return unauthorized;
-  return row;
+  if (!row) return unauthorized;
+  const tokenHash = await sha256Hex(token);
+  if (sameHash(row.token_hash, tokenHash)) return { row, tokenHash };
+  const device = await env.TYCOON_DB.prepare(
+    "SELECT 1 AS ok FROM devices WHERE token_hash = ? AND player_id = ?",
+  )
+    .bind(tokenHash, id)
+    .first();
+  return device ? { row, tokenHash } : unauthorized;
 }
 
 function storedState(row: PlayerRow): GameState {
@@ -129,8 +154,9 @@ async function startSession(request: Request, env: TycoonEnv, now: number): Prom
   const body = sessionRequestSchema.safeParse(parsed.body);
   if (!body.success) return jsonError(400, "bad_request", 'Expected a JSON body like { "v": 1 }.');
   if (body.data.v !== RULES_VERSION) return upgradeRequired();
-  const row = await authenticate(request, env);
-  if (row instanceof Response) return row;
+  const auth = await authenticate(request, env);
+  if (auth instanceof Response) return auth;
+  const { row } = auth;
 
   // Offline earnings, by our clock and capped (rules.ts OFFLINE_CAP_MS).
   const offline = applyOffline(storedState(row), now - row.state_at);
@@ -160,8 +186,9 @@ async function save(request: Request, env: TycoonEnv, now: number): Promise<Resp
   const body = saveRequestSchema.safeParse(parsed.body);
   if (!body.success) return jsonError(400, "bad_request", "Malformed save.");
   if (body.data.v !== RULES_VERSION) return upgradeRequired();
-  const row = await authenticate(request, env);
-  if (row instanceof Response) return row;
+  const auth = await authenticate(request, env);
+  if (auth instanceof Response) return auth;
+  const { row } = auth;
   if (row.session !== body.data.session) {
     return jsonError(
       409,
@@ -191,6 +218,85 @@ async function save(request: Request, env: TycoonEnv, now: number): Promise<Resp
   );
 }
 
+function newPairingCode(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(PAIRING_CODE_LENGTH));
+  // 256 isn't a multiple of the alphabet size; the bias (≤ 1 in 8) doesn't matter for a code
+  // that lives 10 minutes and is rate-limited to claim.
+  return [...bytes].map((b) => PAIRING_CODE_ALPHABET[b % PAIRING_CODE_ALPHABET.length]).join("");
+}
+
+async function createPairingCode(request: Request, env: TycoonEnv, now: number): Promise<Response> {
+  const auth = await authenticate(request, env);
+  if (auth instanceof Response) return auth;
+  const code = newPairingCode();
+  const expiresAt = now + PAIRING_CODE_MS;
+  // One live code per player; expired codes are swept on the way.
+  await env.TYCOON_DB.batch([
+    env.TYCOON_DB.prepare("DELETE FROM pairing_codes WHERE player_id = ? OR expires_at <= ?").bind(
+      auth.row.id,
+      now,
+    ),
+    env.TYCOON_DB.prepare(
+      "INSERT INTO pairing_codes (code, player_id, expires_at) VALUES (?, ?, ?)",
+    ).bind(code, auth.row.id, expiresAt),
+  ]);
+  return Response.json({ code, expiresInMs: PAIRING_CODE_MS }, { headers: noStore });
+}
+
+async function claimPairingCode(request: Request, env: TycoonEnv, now: number): Promise<Response> {
+  const key = rateLimitKey(request.headers.get("CF-Connecting-IP"), "tycoon-pair");
+  const { success } = await env.TYCOON_PAIR_LIMITER.limit({ key });
+  if (!success) {
+    return jsonError(429, "rate_limited", "Too many attempts; try again in a minute.", {
+      "Retry-After": "60",
+    });
+  }
+  const parsed = await readJson(request);
+  if (parsed instanceof Response) return parsed;
+  const body = claimRequestSchema.safeParse(parsed.body);
+  if (!body.success) {
+    return jsonError(400, "bad_request", 'Expected a JSON body like { "code": "ABC234" }.');
+  }
+  const code = normalisePairingCode(body.data.code);
+  // Single use: the delete is what claims it, so two devices racing can't both win.
+  const claimed = await env.TYCOON_DB.prepare(
+    "DELETE FROM pairing_codes WHERE code = ? AND expires_at > ? RETURNING player_id",
+  )
+    .bind(code, now)
+    .first<{ player_id: string }>();
+  if (!claimed) return jsonError(404, "invalid_code", "That code is wrong or has expired.");
+
+  const row = await env.TYCOON_DB.prepare("SELECT state FROM players WHERE id = ?")
+    .bind(claimed.player_id)
+    .first<{ state: string }>();
+  if (!row) return jsonError(404, "invalid_code", "That code is wrong or has expired.");
+  const state = upgradeState(gameStateSchema.parse(JSON.parse(row.state)));
+  state.linked = true;
+  checkAchievements(state);
+
+  const token = base64url(crypto.getRandomValues(new Uint8Array(32)));
+  await env.TYCOON_DB.batch([
+    env.TYCOON_DB.prepare(
+      "INSERT INTO devices (token_hash, player_id, client, created_at) VALUES (?, ?, ?, ?)",
+    ).bind(await sha256Hex(token), claimed.player_id, body.data.client, now),
+    env.TYCOON_DB.prepare(
+      "UPDATE players SET state = ?, rules_version = ?, updated_at = ? WHERE id = ?",
+    ).bind(JSON.stringify(state), RULES_VERSION, now, claimed.player_id),
+  ]);
+  return Response.json({ player: claimed.player_id, token }, { status: 201, headers: noStore });
+}
+
+async function forgetDevice(request: Request, env: TycoonEnv): Promise<Response> {
+  const auth = await authenticate(request, env);
+  if (auth instanceof Response) return auth;
+  // The player's first secret isn't a device row, so this is a no-op for it (it can't be
+  // revoked without losing the player).
+  await env.TYCOON_DB.prepare("DELETE FROM devices WHERE token_hash = ? AND player_id = ?")
+    .bind(auth.tokenHash, auth.row.id)
+    .run();
+  return new Response(null, { status: 204, headers: noStore });
+}
+
 /** Handles /api/tycoon/*. `now` is injectable for tests. */
 export async function handleTycoon(
   request: Request,
@@ -205,6 +311,16 @@ export async function handleTycoon(
       return request.method === "POST" ? startSession(request, env, now) : methodNotAllowed("POST");
     case "/api/tycoon/save":
       return request.method === "PUT" ? save(request, env, now) : methodNotAllowed("PUT");
+    case "/api/tycoon/pair":
+      return request.method === "POST"
+        ? createPairingCode(request, env, now)
+        : methodNotAllowed("POST");
+    case "/api/tycoon/pair/claim":
+      return request.method === "POST"
+        ? claimPairingCode(request, env, now)
+        : methodNotAllowed("POST");
+    case "/api/tycoon/device":
+      return request.method === "DELETE" ? forgetDevice(request, env) : methodNotAllowed("DELETE");
     default:
       return jsonError(404, "not_found", "No such API route.");
   }

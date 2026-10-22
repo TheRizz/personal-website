@@ -1,0 +1,44 @@
+{
+  "name": "@rymart/pipeline-tycoon",
+  "version": "0.1.0",
+  "description": "Pipeline Tycoon in your terminal: the idle data-pipeline game from ry-mart.com, same save as the web.",
+  "type": "module",
+  "bin": {
+    "pipeline-tycoon": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "game",
+    "idle",
+    "incremental",
+    "terminal",
+    "cli"
+  ],
+  "homepage": "https://ry-mart.com/games/pipeline-tycoon",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TheRizz/personal-website.git",
+    "directory": "packages/pipeline-tycoon-cli"
+  },
+  "license": "UNLICENSED",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "stage": "node stage.mjs",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@site/tycoon-core": "workspace:*",
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.28.2"
+  }
+}

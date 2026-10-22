@@ -15,7 +15,7 @@ import { goldenSpawn, type GoldenKind } from "./golden";
  * Bumped whenever a rule or number changes, so the server can refuse clients that would replay
  * differently (docs/04-pipeline-tycoon.md §2.1). `upgradeState` migrates stored saves forward.
  */
-export const RULES_VERSION = 1;
+export const RULES_VERSION = 2;
 
 /** Offline time is credited up to this much, by the server's clock. */
 export const OFFLINE_CAP_MS = 8 * 60 * 60 * 1000;
@@ -59,6 +59,8 @@ export interface GameState {
   /** Production ×OVERCLOCK_FACTOR until this playMs. */
   overclockUntil: number;
   ended: boolean;
+  /** A second device (the CLI) has been linked to this player (since rules v2). */
+  linked: boolean;
   /** This session's golden-packet schedule, issued by the server (golden.ts). */
   golden: { seed: number; start: number; next: number };
 }
@@ -81,6 +83,7 @@ export function newGame(): GameState {
     bestRate: 0,
     overclockUntil: 0,
     ended: false,
+    linked: false,
     golden: { seed: 0, start: 0, next: 0 },
   };
 }
@@ -219,6 +222,8 @@ function passes(state: GameState, test: AchievementTest): boolean {
       return state.bestRate >= test.perSecond;
     case "ended":
       return state.ended;
+    case "linked":
+      return state.linked;
   }
 }
 
