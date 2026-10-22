@@ -1,6 +1,6 @@
 {
   "name": "@rymart/pipeline-tycoon",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pipeline Tycoon in your terminal: the idle data-pipeline game from ry-mart.com, same save as the web.",
   "type": "module",
   "bin": {
