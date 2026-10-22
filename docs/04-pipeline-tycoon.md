@@ -120,7 +120,7 @@ the rules: the sync controller and HTTP client (`TycoonController`, `TycoonClien
 
 - ~~Before phase 2 ships: an npm account and an org named `rymart`.~~ Done: npm user `ry-mart`, org `rymart`; the CLI publishes as `@rymart/pipeline-tycoon`.
 - ~~Before deploying phase 1: the Cloudflare API token needs D1 edit on `tycoon`.~~ Done (deployed).
-- Before the first CLI release, once: see §5, *First release*.
+- ~~Before the first CLI release, once: see §5, *First release*.~~ Done 2026-10-22: 0.1.0 published by hand, trusted publisher set up; 0.1.1 was the first release from `release-cli.yml`.
 
 ## 5. Releasing the CLI
 
@@ -141,5 +141,8 @@ package and publishes it with npm trusted publishing (no token stored; provenanc
 2. From the repo: `pnpm install && pnpm --filter @rymart/pipeline-tycoon run stage`.
 3. `npm publish packages/pipeline-tycoon-cli/publish --access public --no-provenance`.
 4. On npmjs.com: package → Settings → *Trusted publisher* → GitHub Actions, repository
-   `TheRizz/personal-website`, workflow `release-cli.yml`.
-5. From then on, releases are tags.
+   `TheRizz/personal-website`, workflow `release-cli.yml`, environment empty, and tick **Allow npm
+   publish** (otherwise the workflow may only stage releases).
+5. The connection shows *Pending validation* until the workflow first publishes through it (npm
+   gives two days), so push a tag soon after.
+6. From then on, releases are tags.
