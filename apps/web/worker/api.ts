@@ -1,9 +1,11 @@
 import { createLobbyRequestSchema, generateLobbyCode, isLobbyCode } from "@site/game-core";
+import { parseCreateRoom } from "../app/lib/games/volley/net";
 
 const noStore = { "Cache-Control": "no-store" };
 /** Fresh codes tried when /init reports that a code is already taken. */
 const MAX_CODE_ATTEMPTS = 3;
 const LOBBY_PATH = /^\/api\/lobbies\/([^/]+)(\/ws)?$/;
+const VOLLEY_PATH = /^\/api\/volley\/([^/]+)(\/ws)?$/;
 
 /** The JSON error shape every /api route uses (design doc §4.5). Never cached. */
 export function jsonError(
@@ -65,12 +67,19 @@ function expandIpv6(address: string): number[] | null {
   return groups.map((g) => parseInt(g, 16));
 }
 
-async function createLobby(request: Request, env: Env): Promise<Response> {
+/** The two kinds of room: turn-based lobbies (tic-tac-toe) and Power Volley rooms. */
+type Rooms = "lobbies" | "volley";
+
+const namespace = (env: Env, rooms: Rooms) =>
+  rooms === "lobbies" ? env.GAME_LOBBY : env.VOLLEY_ROOM;
+
+async function createRoom(request: Request, env: Env, rooms: Rooms): Promise<Response> {
   const mediaType = request.headers.get("Content-Type")?.split(";")[0]?.trim().toLowerCase();
   if (mediaType !== "application/json") {
     return jsonError(415, "unsupported_media_type", "Send the body as application/json.");
   }
-  // Counted before the body is read, so malformed requests use up the quota too.
+  // Counted before the body is read, so malformed requests use up the quota too. Both kinds of
+  // room share one quota.
   const key = rateLimitKey(request.headers.get("CF-Connecting-IP"));
   const { success } = await env.LOBBY_CREATE_LIMITER.limit({ key });
   if (!success) {
@@ -79,38 +88,59 @@ async function createLobby(request: Request, env: Env): Promise<Response> {
     });
   }
   const body: unknown = await request.json().catch(() => undefined);
-  const parsed = createLobbyRequestSchema.safeParse(body);
-  if (!parsed.success) {
-    return jsonError(400, "bad_request", 'Expected a JSON body like { "game": "tictactoe" }.');
+  let settings: object;
+  if (rooms === "lobbies") {
+    const parsed = createLobbyRequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return jsonError(400, "bad_request", 'Expected a JSON body like { "game": "tictactoe" }.');
+    }
+    settings = { game: parsed.data.game };
+  } else {
+    const parsed = parseCreateRoom(body);
+    if (!parsed) {
+      return jsonError(
+        400,
+        "bad_request",
+        'Expected a JSON body like { "court": "beach", "target": 11 }.',
+      );
+    }
+    settings = parsed;
   }
 
   for (let attempt = 0; attempt < MAX_CODE_ATTEMPTS; attempt++) {
     const code = generateLobbyCode();
-    const response = await env.GAME_LOBBY.getByName(code).fetch(
-      new Request("https://lobby/init", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code, game: parsed.data.game }),
-      }),
-    );
+    const response = await namespace(env, rooms)
+      .getByName(code)
+      .fetch(
+        new Request("https://lobby/init", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code, ...settings }),
+        }),
+      );
     if (response.status === 409) continue;
     if (response.status !== 201) throw new Error(`Lobby init failed with ${response.status}`);
     return Response.json(await response.json(), {
       status: 201,
-      headers: { ...noStore, Location: `/api/lobbies/${code}` },
+      headers: { ...noStore, Location: `/api/${rooms}/${code}` },
     });
   }
   return jsonError(503, "unavailable", "Could not allocate a lobby code; try again.");
 }
 
-async function getLobby(code: string, env: Env): Promise<Response> {
-  const response = await env.GAME_LOBBY.getByName(code).fetch("https://lobby/info");
+async function getLobby(code: string, env: Env, rooms: Rooms): Promise<Response> {
+  const response = await namespace(env, rooms).getByName(code).fetch("https://lobby/info");
   if (response.status === 404) return jsonError(404, "not_found", "Lobby not found.");
   if (!response.ok) throw new Error(`Lobby info failed with ${response.status}`);
   return Response.json(await response.json(), { headers: noStore });
 }
 
-function connectLobby(request: Request, code: string, env: Env): Promise<Response> | Response {
+function connectLobby(
+  request: Request,
+  code: string,
+  env: Env,
+  rooms: Rooms,
+): Promise<Response> | Response {
   if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
     return jsonError(426, "upgrade_required", "Connect with a WebSocket.", {
       Upgrade: "websocket",
@@ -127,22 +157,26 @@ function connectLobby(request: Request, code: string, env: Env): Promise<Respons
   }
   if (!isLobbyCode(code)) return jsonError(404, "not_found", "Lobby not found.");
   // The DO answers 404 (unknown lobby) or 101 with the socket.
-  return env.GAME_LOBBY.getByName(code).fetch(new Request("https://lobby/ws", request));
+  return namespace(env, rooms).getByName(code).fetch(new Request("https://lobby/ws", request));
 }
 
 async function route(request: Request, env: Env): Promise<Response> {
   const { pathname } = new URL(request.url);
-  if (pathname === "/api/lobbies") {
-    return request.method === "POST" ? createLobby(request, env) : methodNotAllowed("POST");
+  if (pathname === "/api/lobbies" || pathname === "/api/volley") {
+    const rooms = pathname === "/api/lobbies" ? "lobbies" : "volley";
+    return request.method === "POST" ? createRoom(request, env, rooms) : methodNotAllowed("POST");
   }
-  const match = LOBBY_PATH.exec(pathname);
+  const lobby = LOBBY_PATH.exec(pathname);
+  const volley = lobby ? null : VOLLEY_PATH.exec(pathname);
+  const match = lobby ?? volley;
   if (match) {
+    const rooms = lobby ? "lobbies" : "volley";
     if (request.method !== "GET") return methodNotAllowed("GET");
     const code = match[1] ?? "";
-    if (match[2]) return connectLobby(request, code, env);
+    if (match[2]) return connectLobby(request, code, env, rooms);
     // Malformed codes never reach (or create) a Durable Object.
     if (!isLobbyCode(code)) return jsonError(404, "not_found", "Lobby not found.");
-    return getLobby(code, env);
+    return getLobby(code, env, rooms);
   }
   return jsonError(404, "not_found", "No such API route.");
 }

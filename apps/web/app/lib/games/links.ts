@@ -3,15 +3,25 @@ import { normalizeLobbyCode } from "@site/game-core";
 /** Path of a tic-tac-toe lobby page. */
 export const lobbyPath = (code: string) => `/games/tictactoe/${code}`;
 
+/** Path of an online Power Volley room. */
+export const volleyPath = (code: string) => `/games/volley/${code}`;
+
 /** The link a player shares to invite someone, e.g. https://ry-mart.com/games/tictactoe/K7QXM2. */
-export function inviteUrl(origin: string, code: string): string {
-  return new URL(lobbyPath(code), origin).href;
+export function inviteUrl(origin: string, code: string, path = lobbyPath): string {
+  return new URL(path(code), origin).href;
 }
 
-/** Same-origin WebSocket URL for a lobby: wss: on https pages, ws: on http (local dev). */
-export function socketUrl(location: { protocol: string; host: string }, code: string): string {
+/**
+ * Same-origin WebSocket URL for a lobby (or, with `rooms` "volley", a Power Volley room): wss: on
+ * https pages, ws: on http (local dev).
+ */
+export function socketUrl(
+  location: { protocol: string; host: string },
+  code: string,
+  rooms: "lobbies" | "volley" = "lobbies",
+): string {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${location.host}/api/lobbies/${encodeURIComponent(code)}/ws`;
+  return `${protocol}//${location.host}/api/${rooms}/${encodeURIComponent(code)}/ws`;
 }
 
 /**
@@ -22,7 +32,7 @@ export function codeFromInput(raw: string): string {
   if (!raw.includes("/")) return normalizeLobbyCode(raw);
   const path = raw.split(/[?#]/)[0] ?? "";
   const segment =
-    /\/tictactoe\/([^/\s]+)/i.exec(path)?.[1] ??
+    /\/(?:tictactoe|volley)\/([^/\s]+)/i.exec(path)?.[1] ??
     // Host names ("ry-mart.com", "localhost:5173") are never codes.
     path
       .split("/")

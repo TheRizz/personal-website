@@ -11,22 +11,37 @@ export const CREATE_ERROR_TEXT = {
 } as const;
 
 /** POST /api/lobbies for a new tic-tac-toe lobby. */
-export async function createLobby(
+export function createLobby(fetchFn: Fetch = fetch, signal?: AbortSignal) {
+  return createRoom("/api/lobbies", { game: "tictactoe" }, fetchFn, signal);
+}
+
+/** POST /api/volley for a new online Power Volley room. */
+export function createVolleyRoom(
+  settings: { court: string; target: number },
   fetchFn: Fetch = fetch,
+  signal?: AbortSignal,
+) {
+  return createRoom("/api/volley", settings, fetchFn, signal);
+}
+
+async function createRoom(
+  path: string,
+  body: object,
+  fetchFn: Fetch,
   signal?: AbortSignal,
 ): Promise<CreateLobbyResult> {
   try {
-    const response = await fetchFn("/api/lobbies", {
+    const response = await fetchFn(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ game: "tictactoe" }),
+      body: JSON.stringify(body),
       signal,
     });
     if (response.status === 429) return { ok: false, error: "rate_limited" };
     if (response.status !== 201) return { ok: false, error: "failed" };
-    const body: unknown = await response.json();
+    const created: unknown = await response.json();
     const code =
-      typeof body === "object" && body !== null ? (body as { code?: unknown }).code : null;
+      typeof created === "object" && created !== null ? (created as { code?: unknown }).code : null;
     return isLobbyCode(code) ? { ok: true, code } : { ok: false, error: "failed" };
   } catch {
     return { ok: false, error: "failed" };
@@ -40,13 +55,22 @@ export type LobbyLookup =
   | { kind: "error" };
 
 /** GET /api/lobbies/:code: does the lobby still exist? */
-export async function lookupLobby(
-  code: string,
-  fetchFn: Fetch = fetch,
+export function lookupLobby(code: string, fetchFn: Fetch = fetch, signal?: AbortSignal) {
+  return lookupRoom(`/api/lobbies/${encodeURIComponent(code)}`, fetchFn, signal);
+}
+
+/** GET /api/volley/:code: does the Power Volley room still exist? */
+export function lookupVolleyRoom(code: string, fetchFn: Fetch = fetch, signal?: AbortSignal) {
+  return lookupRoom(`/api/volley/${encodeURIComponent(code)}`, fetchFn, signal);
+}
+
+async function lookupRoom(
+  path: string,
+  fetchFn: Fetch,
   signal?: AbortSignal,
 ): Promise<LobbyLookup> {
   try {
-    const response = await fetchFn(`/api/lobbies/${encodeURIComponent(code)}`, {
+    const response = await fetchFn(path, {
       headers: { Accept: "application/json" },
       signal,
     });
