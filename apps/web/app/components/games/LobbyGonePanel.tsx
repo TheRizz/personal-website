@@ -2,7 +2,14 @@ import { Link } from "react-router";
 import { card, primaryButton } from "./ui";
 
 /** Friendly dead end for an unknown or expired lobby, with a way to start over. */
-export function LobbyGonePanel({ expired = false }: { expired?: boolean }) {
+export function LobbyGonePanel({
+  expired = false,
+  startPath = "/games/tictactoe",
+}: {
+  expired?: boolean;
+  /** Where "Start a new game" goes. */
+  startPath?: string;
+}) {
   return (
     <section className={`${card} text-center`} aria-labelledby="lobby-gone-title">
       <h2 id="lobby-gone-title" className="text-2xl leading-tight font-bold tracking-tight">
@@ -13,7 +20,7 @@ export function LobbyGonePanel({ expired = false }: { expired?: boolean }) {
           ? "Nobody played for a while, so the game was closed."
           : "Check the code, or start a new game and send your friend the link."}
       </p>
-      <Link to="/games/tictactoe" className={`${primaryButton} mt-6`}>
+      <Link to={startPath} className={`${primaryButton} mt-6`}>
         Start a new game
       </Link>
     </section>

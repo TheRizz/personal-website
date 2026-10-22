@@ -14,7 +14,7 @@ export interface Setup {
   p2: string;
 }
 
-export type Mode = "cpu" | "local" | "coop" | "versus";
+export type Mode = "cpu" | "local" | "online" | "coop" | "versus";
 
 /** Who controls a player. */
 export type Controller = "p1" | "p2" | "cpu";
@@ -23,6 +23,11 @@ export const MODES: Record<Setup["format"], { mode: Mode; label: string; hint: s
   "1v1": [
     { mode: "cpu", label: "Vs computer", hint: "You against the computer." },
     { mode: "local", label: "2 players", hint: "Two of you on one device." },
+    {
+      mode: "online",
+      label: "Online",
+      hint: "Play a friend on their own phone or computer: start a game and send them the link.",
+    },
   ],
   "2v2": [
     {
@@ -71,15 +76,15 @@ export function parseSetup(value: unknown): Setup {
   };
 }
 
-/** Whether a second person plays. */
-export const hasPlayerTwo = (setup: Setup) => setup.mode !== "cpu";
+/** Whether a second person plays on this device. */
+export const hasPlayerTwo = (setup: Setup) => setup.mode !== "cpu" && setup.mode !== "online";
 
 /**
  * Who controls each player, in match order: the left team (back, then front), then the right
  * team (back, then front). A person in 2v2 plays at the front, nearer the net.
  */
 export function controllers(setup: Setup): Controller[] {
-  if (setup.format === "1v1") return ["p1", setup.mode === "local" ? "p2" : "cpu"];
+  if (setup.format === "1v1") return ["p1", setup.mode === "cpu" ? "cpu" : "p2"];
   if (setup.mode === "coop") return ["p2", "p1", "cpu", "cpu"];
   if (setup.mode === "versus") return ["cpu", "p1", "cpu", "p2"];
   return ["cpu", "p1", "cpu", "cpu"];

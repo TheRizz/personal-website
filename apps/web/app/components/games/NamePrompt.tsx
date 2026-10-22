@@ -3,7 +3,15 @@ import { checkName, NameField } from "./NameField";
 import { card, primaryButton } from "./ui";
 
 /** Asks an invited player for a display name before joining. */
-export function NamePrompt({ code, onSubmit }: { code: string; onSubmit: (name: string) => void }) {
+export function NamePrompt({
+  code,
+  game = "tic-tac-toe",
+  onSubmit,
+}: {
+  code: string;
+  game?: string;
+  onSubmit: (name: string) => void;
+}) {
   const [value, setValue] = useState("");
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -28,7 +36,7 @@ export function NamePrompt({ code, onSubmit }: { code: string; onSubmit: (name: 
     >
       <div>
         <h2 id="invite-title" className="text-2xl leading-tight font-bold tracking-tight">
-          You've been invited to play tic-tac-toe
+          You've been invited to play {game}
         </h2>
         <p className="mt-2 text-muted">
           Pick a name to join game <span className="font-mono text-fg">{code}</span>.

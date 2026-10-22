@@ -14,6 +14,7 @@ import {
 } from "./security-headers";
 
 export { GameLobby } from "./game-lobby";
+export { VolleyRoom } from "./volley-room";
 
 declare module "react-router" {
   export interface AppLoadContext {

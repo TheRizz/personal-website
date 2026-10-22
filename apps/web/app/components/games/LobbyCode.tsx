@@ -27,7 +27,7 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 /** The lobby code in large type with a "Copy invite link" button. */
-export function LobbyCode({ code }: { code: string }) {
+export function LobbyCode({ code, path }: { code: string; path?: (code: string) => string }) {
   const [copied, setCopied] = useState<"copied" | "failed" | null>(null);
 
   useEffect(() => {
@@ -37,7 +37,7 @@ export function LobbyCode({ code }: { code: string }) {
   }, [copied]);
 
   async function copy() {
-    const ok = await copyText(inviteUrl(window.location.origin, code));
+    const ok = await copyText(inviteUrl(window.location.origin, code, path));
     setCopied(ok ? "copied" : "failed");
   }
 

@@ -4,7 +4,7 @@ import { pageMeta } from "~/lib/meta";
 import type { Route } from "./+types/games.volley";
 
 const DESCRIPTION =
-  "Side-view arcade volleyball after Powa Volley Classic: 1v1 or 2v2, against the computer or a friend on the same device.";
+  "Side-view arcade volleyball after Powa Volley Classic: 1v1 or 2v2, against the computer, a friend on the same device, or a friend online.";
 
 export const meta: Route.MetaFunction = () =>
   pageMeta({ title: "Power Volley", description: DESCRIPTION, path: "/games/volley" });

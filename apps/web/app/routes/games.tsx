@@ -23,7 +23,7 @@ const GAMES = [
     title: "Power Volley",
     summary:
       "Arcade volleyball after Powa Volley Classic. Jump into the ball, win the serve, watch out for the monkey.",
-    details: "1–2 players • 1v1 or 2v2 • Keyboard, gamepad or touch",
+    details: "1–2 players • 1v1 or 2v2 • Online 1v1 • Keyboard, gamepad or touch",
     icon: "volley",
   },
 ] as const;

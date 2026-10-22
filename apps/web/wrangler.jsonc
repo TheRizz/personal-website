@@ -16,11 +16,18 @@
     "html_handling": "drop-trailing-slash",
   },
 
-  // One Durable Object per game lobby (design doc §4.5).
+  // One Durable Object per game lobby (design doc §4.5), and one per online Power Volley room,
+  // which runs the match itself (worker/volley-room.ts).
   "durable_objects": {
-    "bindings": [{ "name": "GAME_LOBBY", "class_name": "GameLobby" }],
+    "bindings": [
+      { "name": "GAME_LOBBY", "class_name": "GameLobby" },
+      { "name": "VOLLEY_ROOM", "class_name": "VolleyRoom" },
+    ],
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["GameLobby"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["GameLobby"] },
+    { "tag": "v2", "new_sqlite_classes": ["VolleyRoom"] },
+  ],
 
   // POST /api/lobbies is limited per client IP. Config can't import game-core, so `limit` must be
   // kept equal to LOBBY_CREATE_LIMIT_PER_MINUTE there (the unit and e2e tests use that constant).
