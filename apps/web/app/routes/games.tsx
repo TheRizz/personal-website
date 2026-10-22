@@ -5,7 +5,8 @@ import { Mark } from "~/components/games/Marks";
 import { pageMeta } from "~/lib/meta";
 import type { Route } from "./+types/games";
 
-const DESCRIPTION = "Small games you can play with a friend, or against the computer.";
+const DESCRIPTION =
+  "Small games you can play with a friend, against the computer, or slowly, over many coffee breaks.";
 
 export const meta: Route.MetaFunction = () =>
   pageMeta({ title: "Games", description: DESCRIPTION, path: "/games" });
@@ -26,7 +27,38 @@ const GAMES = [
     details: "1–2 players • 1v1 or 2v2 • Online 1v1 • Keyboard, gamepad or touch",
     icon: "volley",
   },
+  {
+    to: "/games/pipeline-tycoon",
+    title: "Pipeline Tycoon",
+    summary:
+      "An idle tycoon about data pipelines. Start with an intern copy-pasting CSVs, end by integrating the planet.",
+    details: "1 player • Idle / clicker • Saves to the server • Mouse, touch or keyboard",
+    icon: "tycoon",
+  },
 ] as const;
+
+/** Nodes feeding a core, for the Pipeline Tycoon card. */
+function TycoonIcon() {
+  return (
+    <svg viewBox="0 0 48 48" aria-hidden="true" className="size-full text-fg" fill="none">
+      <g stroke="currentColor" strokeOpacity="0.45" strokeWidth="2">
+        <path d="M9 10 24 24M39 10 24 24M9 38l15-14M39 38 24 24" />
+      </g>
+      <circle cx="24" cy="24" r="7" stroke="currentColor" strokeWidth="2.5" />
+      <circle cx="24" cy="24" r="2.5" fill="currentColor" />
+      {[
+        [9, 10],
+        [39, 10],
+        [9, 38],
+        [39, 38],
+      ].map(([x, y]) => (
+        <circle key={`${x}-${y}`} cx={x} cy={y} r="3.5" stroke="currentColor" strokeWidth="2" />
+      ))}
+      <circle cx="16.5" cy="17" r="1.6" fill="currentColor" />
+      <circle cx="31" cy="31" r="1.6" fill="currentColor" />
+    </svg>
+  );
+}
 
 /** A volleyball by the net, for the Power Volley card. */
 function VolleyIcon() {
@@ -78,7 +110,13 @@ export default function Games() {
                 aria-hidden="true"
                 className="size-16 shrink-0 rounded-xl border border-line bg-surface p-2.5 sm:size-20"
               >
-                {game.icon === "volley" ? <VolleyIcon /> : <TicTacToeIcon />}
+                {game.icon === "volley" ? (
+                  <VolleyIcon />
+                ) : game.icon === "tycoon" ? (
+                  <TycoonIcon />
+                ) : (
+                  <TicTacToeIcon />
+                )}
               </div>
               <div className="min-w-0 flex-1">
                 <h2 className="mb-1.5 flex items-center gap-2 text-xl leading-snug font-bold tracking-tight decoration-underline decoration-1 underline-offset-4 transition duration-200 ease-spring group-hover:translate-x-0.5 group-hover:underline">

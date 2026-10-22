@@ -1,5 +1,6 @@
 import { createLobbyRequestSchema, generateLobbyCode, isLobbyCode } from "@site/game-core";
 import { parseCreateRoom } from "../app/lib/games/volley/net";
+import { handleTycoon } from "./tycoon-api";
 
 const noStore = { "Cache-Control": "no-store" };
 /** Fresh codes tried when /init reports that a code is already taken. */
@@ -30,16 +31,16 @@ export function methodNotAllowed(allow: string): Response {
  * gets a whole /64, so rotating within it must not reset the limit); IPv4-mapped IPv6 addresses
  * count as the IPv4 address.
  */
-export function rateLimitKey(ip: string | null): string {
+export function rateLimitKey(ip: string | null, prefix = "lobby-create"): string {
   const address = (ip ?? "").trim().toLowerCase();
-  if (!address.includes(":")) return `lobby-create:${address || "unknown"}`;
+  if (!address.includes(":")) return `${prefix}:${address || "unknown"}`;
   const hextets = expandIpv6(address.split("%")[0] ?? "");
-  if (!hextets) return `lobby-create:${address}`;
+  if (!hextets) return `${prefix}:${address}`;
   if (hextets.slice(0, 5).every((h) => h === 0) && hextets[5] === 0xffff) {
     const [hi = 0, lo = 0] = hextets.slice(6);
-    return `lobby-create:${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
+    return `${prefix}:${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`;
   }
-  return `lobby-create:${hextets
+  return `${prefix}:${hextets
     .slice(0, 4)
     .map((h) => h.toString(16))
     .join(":")}::/64`;
@@ -162,6 +163,7 @@ function connectLobby(
 
 async function route(request: Request, env: Env): Promise<Response> {
   const { pathname } = new URL(request.url);
+  if (pathname.startsWith("/api/tycoon/")) return handleTycoon(request, env);
   if (pathname === "/api/lobbies" || pathname === "/api/volley") {
     const rooms = pathname === "/api/lobbies" ? "lobbies" : "volley";
     return request.method === "POST" ? createRoom(request, env, rooms) : methodNotAllowed("POST");

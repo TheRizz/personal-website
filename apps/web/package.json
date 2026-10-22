@@ -9,7 +9,7 @@
     "typegen": "wrangler types && react-router typegen",
     "typecheck": "pnpm typegen && tsc -b",
     "deploy": "wrangler deploy",
-    "db:migrate:local": "wrangler d1 migrations apply blog --local"
+    "db:migrate:local": "wrangler d1 migrations apply blog --local && wrangler d1 migrations apply tycoon --local"
   },
   "dependencies": {
     "@fontsource/geist-sans": "^5.3.0",
@@ -17,6 +17,7 @@
     "@site/content-markdown": "workspace:*",
     "@site/content-schema": "workspace:*",
     "@site/game-core": "workspace:*",
+    "@site/tycoon-core": "workspace:*",
     "@tiptap/extensions": "3.31.4",
     "@tiptap/pm": "3.31.4",
     "@tiptap/react": "3.31.4",
@@ -25,6 +26,7 @@
     "jose": "6.2.12",
     "js-yaml": "3.15.2",
     "lucide-react": "^1.55.0",
+    "phaser": "^4.2.1",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
     "react-router": "^7.18.4",
