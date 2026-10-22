@@ -48,6 +48,9 @@ test("clicks and purchases are saved to the server and survive a reload", async 
   await page.getByRole("button", { name: "Save now" }).click();
   expect((await saved).status()).toBe(200);
 
+  // React Router fetches route manifest patches for links shortly after they appear; leaving while
+  // one is in flight logs it as a failure (see admin-shell.spec.ts).
+  await page.waitForLoadState("networkidle");
   await page.reload();
   await play(page);
   await expect(page.getByRole("button", { name: /Intern/ })).toContainText(/Intern\s*1/);
