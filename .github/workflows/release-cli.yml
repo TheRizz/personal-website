@@ -1,0 +1,52 @@
+name: release-cli
+
+# Publishes the Pipeline Tycoon CLI, @rymart/pipeline-tycoon, when a tag `cli-vX.Y.Z` is pushed
+# (docs/04-pipeline-tycoon.md §5). It uses npm trusted publishing: npm checks this workflow's
+# GitHub OIDC token, so no npm token is stored anywhere, and adds a provenance attestation.
+#
+# Release after the site is deployed: the CLI's RULES_VERSION must already be live, or the server
+# refuses it.
+
+on:
+  push:
+    tags: ["cli-v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: release-cli
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: .nvmrc
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or newer.
+      - run: npm install --global npm@^11.5.1
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check the tag matches the package version
+        run: |
+          version="$(node -p "require('./packages/pipeline-tycoon-cli/package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "cli-v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME doesn't match the package version ($version)."
+            exit 1
+          fi
+
+      - run: pnpm --filter @site/tycoon-core --filter @rymart/pipeline-tycoon typecheck
+      - run: pnpm exec vitest run --project tycoon-core --project pipeline-tycoon-cli
+      - run: pnpm --filter @rymart/pipeline-tycoon run stage
+
+      - name: Publish to npm
+        working-directory: packages/pipeline-tycoon-cli/publish
+        run: npm publish --access public

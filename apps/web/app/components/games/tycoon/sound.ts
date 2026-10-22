@@ -1,4 +1,4 @@
-import type { GameEvent } from "~/lib/games/tycoon/controller";
+import type { GameEvent } from "@site/tycoon-core";
 
 // Synthesised blips, no audio files. Muted by default (docs/04-pipeline-tycoon.md §1); the
 // toggle is remembered in localStorage.

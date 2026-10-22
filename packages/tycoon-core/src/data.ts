@@ -338,7 +338,8 @@ export type AchievementTest =
   | { kind: "migrations"; count: number }
   | { kind: "upgrades"; count: number }
   | { kind: "rate"; perSecond: number }
-  | { kind: "ended" };
+  | { kind: "ended" }
+  | { kind: "linked" };
 
 export interface Achievement {
   readonly id: string;
@@ -520,4 +521,10 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
     test: { kind: "rate", perSecond: 1e9 },
   },
   { id: "the-end", name: "Hello, World", blurb: "Integrate Earth.", test: { kind: "ended" } },
+  {
+    id: "works-on-my-machine",
+    name: "Works On My Machine",
+    blurb: "Link a second device (try the CLI).",
+    test: { kind: "linked" },
+  },
 ];

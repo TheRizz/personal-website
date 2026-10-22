@@ -61,9 +61,10 @@ relative to the last save — and the server **replays** it from the last state 
 
 | When | Request |
 | --- | --- |
-| First visit | `POST /api/tycoon/players` → anonymous player id + secret token (kept in localStorage). Rate-limited per IP. |
+| First visit | `POST /api/tycoon/players` → anonymous player id + secret token (kept in localStorage). Rate-limited per IP (20 a minute, enough for a shared office network). |
 | Each page load | `POST /api/tycoon/session` → canonical state with offline earnings applied, a new session id and golden-packet seed. Starting a session ends any other open session (newest wins). |
 | Every 5 min, on tab close (`keepalive`), before a migration, at the ending | `PUT /api/tycoon/save` with the log since the last save. |
+| Linking (rare) | `POST /api/tycoon/pair` → a code; `POST /api/tycoon/pair/claim` → a secret for the new device; `DELETE /api/tycoon/device` to unlink (§3.1). |
 
 About 12 requests per hour of active play, none per click. A save from a superseded session gets
 `409 session_replaced` and the page asks you to reload.
@@ -72,16 +73,73 @@ About 12 requests per hour of active play, none per click. A save from a superse
 
 A separate D1 database, `tycoon`, so game data never shares a database with the blog. One row per
 player (`players`: id, token hash, state JSON, rules version, state time, session id, save
-counter, timestamps). Expand-only migrations, like `blog`. Included in the nightly backup.
+counter, timestamps), plus `devices` (one secret hash per linked device) and `pairing_codes`.
+Expand-only migrations, like `blog`. Included in the nightly backup.
 
 ## 3. Phases
 
 1. **Web game with validated saves** — everything in §1 except the CLI and the public leaderboard.
-2. **Pairing codes and the CLI** — "Link a device" shows a 6-character code; `npx @rymart/pipeline-tycoon` renders the same scene as a terminal schematic (space processes, number keys buy).
+2. **Pairing codes and the CLI** (§3.1, §3.2).
 3. **Leaderboard and moderation** — opt-in top 50 by lifetime Records, cached for a few minutes; names 3–16 of `[A-Za-z0-9_]`, profanity-filtered, hideable from `/admin`.
+
+### 3.1 Linking devices
+
+Either side can show a code and the other claims it:
+
+- **Web → CLI:** Stats → *Play in your terminal* → *Show a link code*, then
+  `npx @rymart/pipeline-tycoon link <CODE>`.
+- **CLI → web:** `pipeline-tycoon code` (or `c` on the CLI's Stats tab), then Stats → *Have a code
+  from another device?* in the browser. That browser switches to the CLI's game (after a warning);
+  its old game stays on the server.
+
+Codes are 6 characters from `ABCDEFGHJKMNPQRSTUVWXYZ23456789` (no look-alikes), work once, for
+10 minutes, one live code per player. Claiming is rate-limited (10 a minute per IP), so guessing
+one of ~887 million codes in its 10 minutes is hopeless. A claim mints a **new secret for that
+device** (stored hashed in `devices`), so unlinking one device (`pipeline-tycoon unlink`) revokes
+only its own secret. The first link unlocks the *Works On My Machine* achievement (rules v2).
+
+### 3.2 The CLI
+
+`packages/pipeline-tycoon-cli`, published as **`@rymart/pipeline-tycoon`**. It shares more than
+the rules: the sync controller and HTTP client (`TycoonController`, `TycoonClient` in
+`tycoon-core/src/client.ts`) are the same code the web page runs, so both sync identically.
+
+- **Screen:** the web scene as a terminal schematic — tiers around the core, links drawn with box
+  characters, packets moving along them, the golden packet ◆ (`g` catches it), the shop beside it.
+  Truecolor, 256 or 16 colours, or none (`NO_COLOR`, `--no-color`). Needs 80×24.
+- **Keys:** space/enter process, 1–0 build, `x` ×1/×10/×100, tab/←→ panels, letters buy upgrades,
+  `m m` migrate, `c` link code, `s` save, `q` save and quit.
+- **Storage:** only `<player>.<secret>`, in `~/.config/pipeline-tycoon/config.json` (mode 0600;
+  `%APPDATA%` on Windows).
+- **Bundle:** esbuild bundles the CLI, the shared code and zod into one file with no runtime
+  dependencies (~110 kB gzipped). `stage.mjs` lays out exactly what goes to npm.
+- **Out of date:** a rules bump makes the server answer 426; the CLI says to run
+  `npx @rymart/pipeline-tycoon@latest`.
 
 ## 4. Owner to-dos
 
 - ~~Before phase 2 ships: an npm account and an org named `rymart`.~~ Done: npm user `ry-mart`, org `rymart`; the CLI publishes as `@rymart/pipeline-tycoon`.
-- Before deploying phase 1: the Cloudflare API token in GitHub secrets needs D1 edit on the new
-  `tycoon` database (an account-wide D1 Edit permission already covers it).
+- ~~Before deploying phase 1: the Cloudflare API token needs D1 edit on `tycoon`.~~ Done (deployed).
+- Before the first CLI release, once: see §5, *First release*.
+
+## 5. Releasing the CLI
+
+Bump `version` in `packages/pipeline-tycoon-cli/package.json`, merge, **let the site deploy
+first** (a new `RULES_VERSION` must be live before a CLI that speaks it), then tag:
+
+```sh
+git tag cli-v0.1.1 && git push origin cli-v0.1.1
+```
+
+`release-cli.yml` checks the tag matches the version, runs the core and CLI tests, stages the
+package and publishes it with npm trusted publishing (no token stored; provenance attached).
+
+**First release (once).** npm can only trust a workflow for a package that already exists, so
+`0.1.0` goes out by hand:
+
+1. `npm login` as `ry-mart` (a member of the `rymart` org).
+2. From the repo: `pnpm install && pnpm --filter @rymart/pipeline-tycoon run stage`.
+3. `npm publish packages/pipeline-tycoon-cli/publish --access public --no-provenance`.
+4. On npmjs.com: package → Settings → *Trusted publisher* → GitHub Actions, repository
+   `TheRizz/personal-website`, workflow `release-cli.yml`.
+5. From then on, releases are tags.

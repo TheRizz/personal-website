@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { RULES_VERSION } from "@site/tycoon-core";
 
 // Pipeline Tycoon end to end: the page talks to the real Worker and local D1 (ADR-0006).
 
@@ -32,7 +33,9 @@ test("the games page links to Pipeline Tycoon", async ({ page }) => {
 });
 
 test("clicks and purchases are saved to the server and survive a reload", async ({ page }) => {
-  const errors = watchErrors(page);
+  // A reload can cut off React Router's background fetch of route manifest patches, which logs
+  // this harmless error (see admin-shell.spec.ts).
+  const errors = watchErrors(page, [/Failed to fetch manifest patches/]);
   const scene = await play(page);
 
   await scene.focus();
@@ -48,8 +51,6 @@ test("clicks and purchases are saved to the server and survive a reload", async 
   await page.getByRole("button", { name: "Save now" }).click();
   expect((await saved).status()).toBe(200);
 
-  // React Router fetches route manifest patches for links shortly after they appear; leaving while
-  // one is in flight logs it as a failure (see admin-shell.spec.ts).
   await page.waitForLoadState("networkidle");
   await page.reload();
   await play(page);
@@ -73,4 +74,71 @@ test("a second tab takes over and the first is told to stop", async ({ page, con
   await halted.getByRole("button", { name: "Continue here" }).click();
   await expect(halted).toHaveCount(0);
   expect(errors).toEqual([]);
+});
+
+test.describe("linking devices", () => {
+  test("a code from the web links a CLI to the same game", async ({ page, request }) => {
+    const errors = watchErrors(page, [/409/]);
+    await play(page);
+    await page.getByRole("tab", { name: "Stats" }).click();
+    await page.getByRole("button", { name: "Show a link code" }).click();
+    const command = await page.locator("code", { hasText: "pipeline-tycoon link" }).textContent();
+    const code = command!.trim().split(" ").at(-1)!;
+    expect(code).toMatch(/^[A-HJKMNP-Z2-9]{6}$/);
+
+    // What `pipeline-tycoon link <CODE>` does, then starts a session.
+    const claim = await request.post("/api/tycoon/pair/claim", { data: { code, client: "cli" } });
+    expect(claim.status()).toBe(201);
+    const { player, token } = await claim.json();
+    const session = await request.post("/api/tycoon/session", {
+      headers: { Authorization: `Bearer ${player}.${token}` },
+      data: { v: RULES_VERSION },
+    });
+    const started = await session.json();
+    expect(started.state.achievements).toContain("works-on-my-machine");
+
+    // The CLI took over, so the browser is told on its next save.
+    await page.getByRole("button", { name: "Save now" }).click();
+    await expect(page.getByRole("dialog")).toContainText("playing on another tab or device");
+    expect(errors).toEqual([]);
+  });
+
+  test("the web can join a game started in the CLI", async ({ page, request }) => {
+    const errors = watchErrors(page);
+    // A CLI player with some progress.
+    const created = await (await request.post("/api/tycoon/players")).json();
+    const cli = `Bearer ${created.player}.${created.token}`;
+    const started = await (
+      await request.post("/api/tycoon/session", {
+        headers: { Authorization: cli },
+        data: { v: RULES_VERSION },
+      })
+    ).json();
+    const clicks = Array.from({ length: 10 }, (_, i) => ({ t: (i + 1) * 1000, a: "click", n: 5 }));
+    await request.put("/api/tycoon/save", {
+      headers: { Authorization: cli },
+      data: {
+        v: RULES_VERSION,
+        session: started.session,
+        seq: 0,
+        log: { elapsed: 10_000, actions: clicks },
+      },
+    });
+    const { code } = await (
+      await request.post("/api/tycoon/pair", { headers: { Authorization: cli } })
+    ).json();
+
+    await play(page);
+    await page.getByRole("tab", { name: "Stats" }).click();
+    await page.getByRole("button", { name: "Have a code from another device?" }).click();
+    await page.getByLabel("Code").fill(`${code.slice(0, 3)} ${code.slice(3)}`);
+    await page.getByRole("button", { name: "Join" }).click();
+    await page.getByRole("button", { name: "Switch" }).click();
+    // The CLI's 50 clicks are now this browser's.
+    const clickCount = page
+      .locator("dt", { hasText: /^Clicks$/ })
+      .locator("xpath=following-sibling::dd[1]");
+    await expect(clickCount).toHaveText("50");
+    expect(errors).toEqual([]);
+  });
 });

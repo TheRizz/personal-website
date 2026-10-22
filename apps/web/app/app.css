@@ -19,6 +19,10 @@
   --surface: rgb(255 255 255 / 0.04);
   --surface-hover: rgb(255 255 255 / 0.08);
   --underline: rgb(244 244 245 / 0.35);
+  /* Accents for game UI (Pipeline Tycoon): readable on this theme's background. */
+  --accent: #67e8f9;
+  --accent-violet: #c4b5fd;
+  --warn: #fcd34d;
   color-scheme: dark;
 }
 
@@ -32,6 +36,9 @@
     --surface: rgb(0 0 0 / 0.03);
     --surface-hover: rgb(0 0 0 / 0.06);
     --underline: rgb(24 24 27 / 0.35);
+    --accent: #0e7490;
+    --accent-violet: #6d28d9;
+    --warn: #b45309;
     color-scheme: light;
   }
 }
@@ -45,6 +52,9 @@
   --surface: rgb(0 0 0 / 0.03);
   --surface-hover: rgb(0 0 0 / 0.06);
   --underline: rgb(24 24 27 / 0.35);
+  --accent: #0e7490;
+  --accent-violet: #6d28d9;
+  --warn: #b45309;
   color-scheme: light;
 }
 
@@ -57,6 +67,9 @@
   --color-surface: var(--surface);
   --color-surface-hover: var(--surface-hover);
   --color-underline: var(--underline);
+  --color-accent: var(--accent);
+  --color-accent-violet: var(--accent-violet);
+  --color-warn: var(--warn);
   --font-sans: "Geist Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);

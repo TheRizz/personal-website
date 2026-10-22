@@ -13,6 +13,9 @@ export default tseslint.config(
       "**/worker-configuration.d.ts",
       "apps/web/app/generated/",
       "playwright-report/",
+      // The CLI bundle and its npm staging folder.
+      "packages/pipeline-tycoon-cli/dist/",
+      "packages/pipeline-tycoon-cli/publish/",
       "test-results/",
       // Vendored third-party Claude skill, kept byte for byte with upstream.
       ".claude/skills/",
@@ -32,7 +35,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["scripts/**", "**/*.config.{js,ts}"],
+    files: ["scripts/**", "**/*.config.{js,ts}", "packages/pipeline-tycoon-cli/*.mjs"],
     languageOptions: { globals: globals.node },
   },
   {

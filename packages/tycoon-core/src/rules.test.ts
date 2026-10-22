@@ -5,6 +5,7 @@ import { formatDuration, formatShort } from "./format";
 import { goldenSpawn, upcomingGolden } from "./golden";
 import {
   OFFLINE_CAP_MS,
+  RULES_VERSION,
   advance,
   apply,
   availableUpgrades,
@@ -24,7 +25,7 @@ import {
   type GameState,
 } from "./rules";
 import { MAX_CLICKS_PER_SECOND, applyOffline, replay } from "./replay";
-import { gameStateSchema, saveLogSchema } from "./schema";
+import { gameStateSchema, saveLogSchema, upgradeState } from "./schema";
 
 /** A mid-game state: some of every tier and a fat bank. */
 function midGame(): GameState {
@@ -266,6 +267,15 @@ describe("schemas", () => {
     expect(saveLogSchema.safeParse({ elapsed: 1, actions: [{ t: 0, a: "hack" }] }).success).toBe(
       false,
     );
+  });
+});
+
+describe("save upgrades", () => {
+  it("reads a rules-v1 save (no `linked`) and brings it to the current version", () => {
+    const { linked: _linked, ...v1 } = { ...midGame(), v: 1 };
+    const upgraded = upgradeState(gameStateSchema.parse(JSON.parse(JSON.stringify(v1))));
+    expect(upgraded.v).toBe(RULES_VERSION);
+    expect(upgraded.linked).toBe(false);
   });
 });
 
