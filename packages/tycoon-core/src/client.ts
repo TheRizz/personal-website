@@ -20,7 +20,7 @@ import { AUTOSAVE_MS } from "./schema";
 
 export type ApiFailure =
   | { kind: "session_replaced" }
-  | { kind: "out_of_sync" }
+  | { kind: "out_of_sync"; saved?: SavedPoint }
   | { kind: "update_required" }
   | { kind: "unauthorized" }
   | { kind: "rate_limited" }
@@ -31,6 +31,13 @@ export class TycoonApiError extends Error {
   constructor(readonly failure: ApiFailure) {
     super(failure.kind === "network" ? `network: ${failure.detail}` : failure.kind);
   }
+}
+
+/** Where the server's save stands, sent with out_of_sync: its seq, state, and how old that is. */
+export interface SavedPoint {
+  seq: number;
+  state: GameState;
+  ageMs: number;
 }
 
 export interface SessionStart {
@@ -61,6 +68,9 @@ export interface ClientOptions {
   kind: "web" | "cli";
   fetch?: typeof fetch;
 }
+
+/** A request that hasn't answered in this long counts as a network failure. */
+const REQUEST_TIMEOUT_MS = 20_000;
 
 /** The /api/tycoon/* endpoints (apps/web/worker/tycoon-api.ts). */
 export class TycoonClient {
@@ -96,6 +106,11 @@ export class TycoonClient {
     try {
       response = await this.fetcher(`${this.options.baseUrl}/api/tycoon/${path}`, {
         method,
+        // A phone can leave a request hanging after it wakes the page; give up rather than wait.
+        // (Older Safari has no AbortSignal.timeout; it just waits as before.)
+        ...(typeof AbortSignal.timeout === "function"
+          ? { signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS) }
+          : {}),
         ...(keepalive ? { keepalive: true } : {}),
         headers: {
           ...(body === undefined ? {} : { "Content-Type": "application/json" }),
@@ -111,14 +126,15 @@ export class TycoonClient {
     }
     const payload = (await response.json().catch(() => null)) as {
       error?: { code?: string };
+      saved?: SavedPoint;
     } | null;
     const code = payload?.error?.code;
-    if (
-      code === "session_replaced" ||
-      code === "out_of_sync" ||
-      code === "update_required" ||
-      code === "invalid_code"
-    ) {
+    if (code === "out_of_sync") {
+      throw new TycoonApiError(
+        payload?.saved ? { kind: code, saved: payload.saved } : { kind: code },
+      );
+    }
+    if (code === "session_replaced" || code === "update_required" || code === "invalid_code") {
       throw new TycoonApiError({ kind: code });
     }
     if (response.status === 401) throw new TycoonApiError({ kind: "unauthorized" });
@@ -224,8 +240,11 @@ export class TycoonController {
   private pending: Pending = { start: 0, actions: [] };
   private inflight: Promise<void> | null = null;
   private saveQueued = false;
-  /** A save failed on the network, so it may or may not have reached the server. */
-  private unconfirmed = false;
+  /**
+   * A save failed on the network, so it may or may not have reached the server: how many of
+   * `pending.actions` it carried (they stay at the front of the log for the retry).
+   */
+  private unconfirmed: number | null = null;
   /** The page came back while that save was in flight: if it fails, retry at once. */
   private retryOnFailure = false;
   /** A resync is fetching a fresh session; saves wait for it. */
@@ -302,7 +321,7 @@ export class TycoonController {
         ? started.offline
         : null;
     this.status = { kind: "playing" };
-    this.unconfirmed = false;
+    this.unconfirmed = null;
     this.retryOnFailure = false;
     this.resyncing = false;
   }
@@ -477,7 +496,7 @@ export class TycoonController {
         unloading,
       );
       this.seq = ack.seq;
-      this.unconfirmed = false;
+      this.unconfirmed = null;
       this.retryOnFailure = false;
       this.lastSavedAt = this.wallClock();
       if (ack.dropped > 0) this.emit({ type: "dropped", count: ack.dropped });
@@ -500,14 +519,15 @@ export class TycoonController {
             ...this.pending.actions.map((a) => ({ ...a, t: a.t + shift })),
           ],
         };
-        this.unconfirmed = true;
+        this.unconfirmed = sent.actions.length;
         this.nextSaveAt = this.retryOnFailure ? this.now() : this.now() + RETRY_MS;
         this.retryOnFailure = false;
         this.saveQueued = false;
       } else if (error instanceof TycoonApiError && error.failure.kind === "out_of_sync") {
         // Only this tab saves with this session, so a save of ours landed without us hearing
-        // back. Anything since it is at most a moment's play (see resume()).
-        void this.resync();
+        // back: the last one that failed on the network. Treat the server's answer as that
+        // save's ack and keep everything played since.
+        if (!this.recover(sent, error.failure.saved)) void this.resync();
       } else {
         this.stop(error);
       }
@@ -518,13 +538,44 @@ export class TycoonController {
   }
 
   /**
+   * Picks up from `saved` when it is the save we never heard back from, keeping the actions
+   * after it. `sent` is the retry the server refused. False when that can't be done safely.
+   */
+  private recover(
+    sent: { start: number; elapsed: number; actions: Action[] },
+    saved?: SavedPoint,
+  ): boolean {
+    const carried = this.unconfirmed;
+    if (!saved || carried === null || saved.seq !== this.seq + 1) return false;
+    // The whole log since the last save we heard about, then the part after the lost save.
+    const shift = this.pending.start - sent.start;
+    const all = [...sent.actions, ...this.pending.actions.map((a) => ({ ...a, t: a.t + shift }))];
+    const now = this.now();
+    // The server measured its save's age when the retry arrived, just after we sent it.
+    const start = Math.max(sent.start, sent.start + sent.elapsed - saved.ageMs);
+    const since = all
+      .slice(carried)
+      .map((a) => ({ ...a, t: Math.max(0, a.t - (start - sent.start)) }));
+    this.seq = saved.seq;
+    this.unconfirmed = null;
+    this.retryOnFailure = false;
+    this.pending = { start, actions: since };
+    this.local = replay(saved.state, { elapsed: now - start, actions: since }).state;
+    this.lastTick = now;
+    this.lastSavedAt = this.wallClock();
+    // Send what came after straight away, so the server has it too.
+    this.nextSaveAt = now;
+    return true;
+  }
+
+  /**
    * Call when the page is shown again. A save cut off while it was hidden gets retried now,
    * before there is much new play riding on it, rather than in RETRY_MS.
    */
   resume() {
     if (!this.playing) return;
     if (this.inflight) this.retryOnFailure = true;
-    else if (this.unconfirmed) void this.save();
+    else if (this.unconfirmed !== null) void this.save();
   }
 
   private stop(error: unknown) {
