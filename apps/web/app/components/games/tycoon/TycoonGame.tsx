@@ -55,18 +55,23 @@ export function TycoonGame() {
   const [toast, setToast] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
 
-  // Start the session once; save on the way out.
+  // Start the session once; save on the way out, and catch up on the way back (a phone may have
+  // suspended the page before that save heard back).
   useEffect(() => {
     void controller.start();
     const leave = () => void controller.save(true);
+    const back = () => controller.resume();
     const hidden = () => {
       if (document.visibilityState === "hidden") leave();
+      else back();
     };
     window.addEventListener("pagehide", leave);
+    window.addEventListener("pageshow", back);
     document.addEventListener("visibilitychange", hidden);
     const refresh = window.setInterval(() => controller.changed(), UI_REFRESH_MS);
     return () => {
       window.removeEventListener("pagehide", leave);
+      window.removeEventListener("pageshow", back);
       document.removeEventListener("visibilitychange", hidden);
       window.clearInterval(refresh);
       leave();

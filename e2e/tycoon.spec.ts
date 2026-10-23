@@ -142,3 +142,54 @@ test.describe("linking devices", () => {
     expect(errors).toEqual([]);
   });
 });
+
+test("coming back to a tab whose save was cut off carries on without halting", async ({
+  page,
+  context,
+}) => {
+  const errors = watchErrors(page, [/Failed to load resource/]);
+  const scene = await play(page);
+  await scene.focus();
+  for (let i = 0; i < 10; i++) {
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(60);
+  }
+
+  // Leaving the tab sends a save; like iOS Safari suspending the page, it reaches the server but
+  // the page never sees the reply.
+  let landed = false;
+  await page.route("**/api/tycoon/save", async (route) => {
+    await route.fetch();
+    landed = true;
+    await route.abort("failed");
+  });
+  const setVisibility = (state: "hidden" | "visible") =>
+    page.evaluate((value) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value });
+      Object.defineProperty(document, "hidden", { configurable: true, value: value === "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, state);
+  await setVisibility("hidden");
+  await expect.poll(() => landed).toBe(true);
+  const cdp = await context.newCDPSession(page);
+  await cdp.send("Page.setWebLifecycleState", { state: "frozen" });
+  await page.waitForTimeout(500);
+  await cdp.send("Page.setWebLifecycleState", { state: "active" });
+  await page.unroute("**/api/tycoon/save");
+
+  // Back: the retry is refused as out of date, and the tab quietly picks up a new session.
+  const resynced = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/session"));
+  await setVisibility("visible");
+  expect((await resynced).status()).toBe(200);
+  await expect(page.getByText("fell out of sync")).toHaveCount(0);
+  await expect(page.getByText("Pipeline halted")).toHaveCount(0);
+
+  // And it keeps saving normally.
+  await page.getByRole("tab", { name: "Stats" }).click();
+  const saved = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/save"));
+  await page.getByRole("button", { name: "Save now" }).click();
+  expect((await saved).status()).toBe(200);
+  await expect(page.getByText("Pipeline halted")).toHaveCount(0);
+  await expect(records(page)).not.toHaveText("0");
+  expect(errors).toEqual([]);
+});
