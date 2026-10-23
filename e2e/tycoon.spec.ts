@@ -147,7 +147,7 @@ test("coming back to a tab whose save was cut off carries on without halting", a
   page,
   context,
 }) => {
-  const errors = watchErrors(page, [/Failed to load resource/]);
+  const errors = watchErrors(page, [/Failed to load resource/, /409/]);
   const scene = await play(page);
   await scene.focus();
   for (let i = 0; i < 10; i++) {
@@ -177,10 +177,10 @@ test("coming back to a tab whose save was cut off carries on without halting", a
   await cdp.send("Page.setWebLifecycleState", { state: "active" });
   await page.unroute("**/api/tycoon/save");
 
-  // Back: the retry is refused as out of date, and the tab quietly picks up a new session.
-  const resynced = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/session"));
+  // Back: the retry is refused as already saved, and the tab carries on from that save.
+  const refused = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/save"));
   await setVisibility("visible");
-  expect((await resynced).status()).toBe(200);
+  expect((await refused).status()).toBe(409);
   await expect(page.getByText("fell out of sync")).toHaveCount(0);
   await expect(page.getByText("Pipeline halted")).toHaveCount(0);
 
@@ -191,5 +191,51 @@ test("coming back to a tab whose save was cut off carries on without halting", a
   expect((await saved).status()).toBe(200);
   await expect(page.getByText("Pipeline halted")).toHaveCount(0);
   await expect(records(page)).not.toHaveText("0");
+  expect(errors).toEqual([]);
+});
+
+test("a save whose reply is lost mid-play keeps everything played since", async ({ page }) => {
+  const errors = watchErrors(page, [
+    /Failed to load resource/,
+    /409/,
+    /Failed to fetch manifest patches/,
+  ]);
+  const scene = await play(page);
+  await scene.focus();
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(60);
+  }
+
+  // A save reaches the server, but its reply never comes back (a flaky phone connection).
+  let landed = false;
+  await page.route("**/api/tycoon/save", async (route) => {
+    await route.fetch();
+    landed = true;
+    await route.abort("failed");
+  });
+  await page.getByRole("tab", { name: "Stats" }).click();
+  await page.getByRole("button", { name: "Save now" }).click();
+  await expect.poll(() => landed).toBe(true);
+  await page.unroute("**/api/tycoon/save");
+
+  // More play after it: a purchase the server hasn't seen.
+  await page.getByRole("tab", { name: "Build" }).click();
+  await page.getByRole("button", { name: /Intern/ }).click();
+  await expect(page.getByRole("button", { name: /Intern/ })).toContainText(/Intern\s*1/);
+
+  // The retry is refused as already saved; the tab keeps the purchase and saves it right after.
+  const followUp = page.waitForResponse(
+    (r) => r.url().endsWith("/api/tycoon/save") && r.status() === 200,
+  );
+  await page.getByRole("tab", { name: "Stats" }).click();
+  await page.getByRole("button", { name: "Save now" }).click();
+  await followUp;
+  await expect(page.getByText("Pipeline halted")).toHaveCount(0);
+
+  await page.waitForLoadState("networkidle");
+  await page.reload();
+  await play(page);
+  await expect(page.getByRole("button", { name: /Intern/ })).toContainText(/Intern\s*1/);
   expect(errors).toEqual([]);
 });

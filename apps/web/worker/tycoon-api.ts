@@ -197,7 +197,16 @@ async function save(request: Request, env: TycoonEnv, now: number): Promise<Resp
     );
   }
   if (row.seq !== body.data.seq) {
-    return jsonError(409, "out_of_sync", "This save is out of date. Reload to continue.");
+    // Only this session saves here, so a save of its own landed without it hearing back (a phone
+    // suspended the page mid-request). Say where the save stands so the client can pick up from
+    // it without losing what was played since (client.ts).
+    return Response.json(
+      {
+        error: { code: "out_of_sync", message: "This save is out of date. Reload to continue." },
+        saved: { seq: row.seq, state: storedState(row), ageMs: Math.max(0, now - row.state_at) },
+      },
+      { status: 409, headers: noStore },
+    );
   }
 
   const result = replay(storedState(row), body.data.log, now - row.state_at + SAVE_SLACK_MS);

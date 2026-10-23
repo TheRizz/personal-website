@@ -12,12 +12,14 @@ import { cloneState, newGame, type GameState } from "./rules";
 import { AUTOSAVE_MS } from "./schema";
 
 /** A server in memory: replays each log like the Worker does, with a clock the test moves. */
-function fakeServer(start: GameState = newGame()) {
+function fakeServer(start: GameState = newGame(), clock: () => number = () => 0) {
   let state = cloneState(start);
   let seq = 0;
   const logs: SaveLog[] = [];
   let failNext: TycoonApiError | null = null;
   let loseNextReply = false;
+  let reportSaved = true;
+  let savedAt = clock();
   let sessions = 0;
   let hold: Promise<void> | null = null;
   const transport: Transport = {
@@ -38,11 +40,21 @@ function fakeServer(start: GameState = newGame()) {
         throw error;
       }
       // Like the Worker: a save that isn't on top of the last one is refused.
-      if (clientSeq !== seq) throw new TycoonApiError({ kind: "out_of_sync" });
+      if (clientSeq !== seq) {
+        throw new TycoonApiError(
+          reportSaved
+            ? {
+                kind: "out_of_sync",
+                saved: { seq, state: cloneState(state), ageMs: clock() - savedAt },
+              }
+            : { kind: "out_of_sync" },
+        );
+      }
       logs.push(log);
       const result = replay(state, log);
       state = result.state;
       seq += 1;
+      savedAt = clock();
       if (loseNextReply) {
         // Saved, but the page never hears back (a phone suspended it mid-request).
         loseNextReply = false;
@@ -63,6 +75,10 @@ function fakeServer(start: GameState = newGame()) {
     loseNextReply() {
       loseNextReply = true;
     },
+    /** Like a Worker from before out_of_sync said where the save stands. */
+    withoutSavedPoint() {
+      reportSaved = false;
+    },
     failWith(error: TycoonApiError) {
       failNext = error;
     },
@@ -79,7 +95,7 @@ function fakeServer(start: GameState = newGame()) {
 
 function setup(start?: GameState) {
   let now = 0;
-  const server = fakeServer(start);
+  const server = fakeServer(start, () => now);
   const controller = new TycoonController(
     server.transport,
     () => now,
@@ -162,8 +178,33 @@ describe("TycoonController", () => {
     expect(server.logs).toHaveLength(1);
   });
 
-  it("resyncs quietly when a save landed but its reply was lost", async () => {
+  it("keeps minutes of play when a save landed but its reply was lost", async () => {
     const { server, controller, advance } = setup();
+    await controller.start();
+    advance(500);
+    controller.click();
+    // An autosave lands, but the reply never arrives (a flaky phone connection).
+    server.loseNextReply();
+    await controller.save();
+    expect(server.state.clicks).toBe(1);
+    // Five more minutes of play before the retry goes out.
+    for (let i = 0; i < 300; i++) {
+      advance(1_000);
+      controller.click();
+    }
+    const records = controller.local!.records;
+    await controller.save();
+    // The server refused the retry as already saved; the tab kept everything since and sent it.
+    await vi.waitFor(() => expect(server.state.clicks).toBe(301));
+    expect(controller.status.kind).toBe("playing");
+    expect(server.sessions).toBe(1);
+    expect(controller.local!.clicks).toBe(301);
+    expect(controller.local!.records).toBeGreaterThanOrEqual(records * 0.99);
+  });
+
+  it("resyncs quietly when a save landed unheard and the server can't say more", async () => {
+    const { server, controller, advance } = setup();
+    server.withoutSavedPoint();
     await controller.start();
     advance(500);
     controller.click();

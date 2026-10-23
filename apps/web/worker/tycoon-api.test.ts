@@ -164,6 +164,8 @@ describe("saves", () => {
     const again = await save(auth, 2_000, s, 1_000, []);
     expect(again.status).toBe(409);
     expect(again.json.error.code).toBe("out_of_sync");
+    // Where the save stands, so a client whose reply got lost can carry on from it.
+    expect(again.json.saved).toEqual({ seq: 1, state: first.json.state, ageMs: 1_000 });
     expect((await save(auth, 2_000, { ...s, seq: 1 }, 1_000, [])).status).toBe(200);
   });
 
