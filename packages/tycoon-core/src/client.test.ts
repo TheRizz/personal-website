@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   TycoonApiError,
   TycoonController,
@@ -17,10 +17,18 @@ function fakeServer(start: GameState = newGame()) {
   let seq = 0;
   const logs: SaveLog[] = [];
   let failNext: TycoonApiError | null = null;
+  let loseNextReply = false;
+  let sessions = 0;
   let hold: Promise<void> | null = null;
   const transport: Transport = {
     async startSession(): Promise<SessionStart> {
-      return { state: cloneState(state), session: "s1", seq, offline: { ms: 0, earned: 0 } };
+      sessions += 1;
+      return {
+        state: cloneState(state),
+        session: `s${sessions}`,
+        seq,
+        offline: { ms: 0, earned: 0 },
+      };
     },
     async uploadSave(_session, clientSeq, log): Promise<SaveAck> {
       if (hold) await hold;
@@ -29,11 +37,17 @@ function fakeServer(start: GameState = newGame()) {
         failNext = null;
         throw error;
       }
-      expect(clientSeq).toBe(seq);
+      // Like the Worker: a save that isn't on top of the last one is refused.
+      if (clientSeq !== seq) throw new TycoonApiError({ kind: "out_of_sync" });
       logs.push(log);
       const result = replay(state, log);
       state = result.state;
       seq += 1;
+      if (loseNextReply) {
+        // Saved, but the page never hears back (a phone suspended it mid-request).
+        loseNextReply = false;
+        throw new TycoonApiError({ kind: "network", detail: "Load failed" });
+      }
       return { state: cloneState(state), seq, dropped: result.dropped.length, creditedMs: 0 };
     },
   };
@@ -42,6 +56,12 @@ function fakeServer(start: GameState = newGame()) {
     logs,
     get state() {
       return state;
+    },
+    get sessions() {
+      return sessions;
+    },
+    loseNextReply() {
+      loseNextReply = true;
     },
     failWith(error: TycoonApiError) {
       failNext = error;
@@ -140,6 +160,46 @@ describe("TycoonController", () => {
     await controller.save();
     expect(server.state.clicks).toBe(2);
     expect(server.logs).toHaveLength(1);
+  });
+
+  it("resyncs quietly when a save landed but its reply was lost", async () => {
+    const { server, controller, advance } = setup();
+    await controller.start();
+    advance(500);
+    controller.click();
+    // The tab is hidden: the save goes out, the phone suspends the page before the reply.
+    server.loseNextReply();
+    await controller.save(true);
+    expect(server.state.clicks).toBe(1);
+    // Back on the tab: the retry runs straight away, finds the save already landed, and the tab
+    // carries on from the server's state in a new session instead of halting.
+    controller.resume();
+    await vi.waitFor(() => expect(server.sessions).toBe(2));
+    await vi.waitFor(() => expect(controller.saving).toBe(false));
+    expect(controller.status.kind).toBe("playing");
+    expect(controller.local?.clicks).toBe(1);
+    advance(500);
+    controller.click();
+    await controller.save();
+    expect(controller.status.kind).toBe("playing");
+    expect(server.state.clicks).toBe(2);
+  });
+
+  it("retries a cut-off save as soon as the page is back, if it is still in flight then", async () => {
+    const { server, controller, advance } = setup();
+    await controller.start();
+    advance(500);
+    controller.click();
+    const release = server.holdSaves();
+    server.failWith(new TycoonApiError({ kind: "network", detail: "Load failed" }));
+    const hidden = controller.save(true);
+    controller.resume();
+    release();
+    await hidden;
+    // Without resume() this would wait RETRY_MS; now the next frame sends it.
+    advance(16);
+    await vi.waitFor(() => expect(server.logs).toHaveLength(1));
+    expect(server.state.clicks).toBe(1);
   });
 
   it("stops when another device takes over", async () => {

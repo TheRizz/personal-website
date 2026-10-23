@@ -224,6 +224,12 @@ export class TycoonController {
   private pending: Pending = { start: 0, actions: [] };
   private inflight: Promise<void> | null = null;
   private saveQueued = false;
+  /** A save failed on the network, so it may or may not have reached the server. */
+  private unconfirmed = false;
+  /** The page came back while that save was in flight: if it fails, retry at once. */
+  private retryOnFailure = false;
+  /** A resync is fetching a fresh session; saves wait for it. */
+  private resyncing = false;
   private lastTick = 0;
   private clickTokens = MAX_CLICKS_PER_SECOND;
   private nextSaveAt = 0;
@@ -251,25 +257,54 @@ export class TycoonController {
       const started = await this.transport.startSession();
       // A later start() superseded this one (and its session) while it was in flight.
       if (attempt !== this.startAttempt) return;
-      const now = this.now();
-      this.session = started.session;
-      this.seq = started.seq;
-      this.local = started.state;
-      this.pending = { start: now, actions: [] };
-      this.lastTick = now;
-      this.clickTokens = MAX_CLICKS_PER_SECOND;
-      this.nextSaveAt = now + AUTOSAVE_MS;
-      // A reload a few seconds later isn't "away"; only say so after a minute.
-      this.offline =
-        started.offline.earned > 0 && started.offline.ms >= OFFLINE_NOTICE_MS
-          ? started.offline
-          : null;
-      this.status = { kind: "playing" };
+      this.begin(started);
     } catch (error) {
       if (attempt !== this.startAttempt) return;
       this.stop(error);
     }
     this.changed();
+  }
+
+  /**
+   * Picks up the server's state in a fresh session without stopping play. Used when a save we
+   * never heard back from turns out to have landed (out_of_sync), which happens when a phone
+   * suspends the page mid-save: the server has everything that save carried, so the tab just
+   * takes the server's state and carries on.
+   */
+  private async resync(): Promise<void> {
+    const attempt = ++this.startAttempt;
+    this.resyncing = true;
+    try {
+      const started = await this.transport.startSession();
+      if (attempt !== this.startAttempt) return;
+      this.begin(started);
+    } catch (error) {
+      if (attempt !== this.startAttempt) return;
+      this.stop(error);
+    } finally {
+      if (attempt === this.startAttempt) this.resyncing = false;
+    }
+    this.changed();
+  }
+
+  private begin(started: SessionStart) {
+    const now = this.now();
+    this.session = started.session;
+    this.seq = started.seq;
+    this.local = started.state;
+    this.pending = { start: now, actions: [] };
+    this.lastTick = now;
+    this.clickTokens = MAX_CLICKS_PER_SECOND;
+    this.nextSaveAt = now + AUTOSAVE_MS;
+    // A reload a few seconds later isn't "away"; only say so after a minute.
+    this.offline =
+      started.offline.earned > 0 && started.offline.ms >= OFFLINE_NOTICE_MS
+        ? started.offline
+        : null;
+    this.status = { kind: "playing" };
+    this.unconfirmed = false;
+    this.retryOnFailure = false;
+    this.resyncing = false;
   }
 
   // ---- subscriptions ----
@@ -406,7 +441,7 @@ export class TycoonController {
    * asked for while one is in flight runs right after it, so it is never lost.
    */
   save(unloading = false): Promise<void> {
-    if (!this.playing) return Promise.resolve();
+    if (!this.playing || this.resyncing) return Promise.resolve();
     if (this.inflight) {
       this.saveQueued = true;
       return this.inflight;
@@ -442,6 +477,8 @@ export class TycoonController {
         unloading,
       );
       this.seq = ack.seq;
+      this.unconfirmed = false;
+      this.retryOnFailure = false;
       this.lastSavedAt = this.wallClock();
       if (ack.dropped > 0) this.emit({ type: "dropped", count: ack.dropped });
       // Rebuild: the server's state at the cut, plus what happened since.
@@ -463,8 +500,14 @@ export class TycoonController {
             ...this.pending.actions.map((a) => ({ ...a, t: a.t + shift })),
           ],
         };
-        this.nextSaveAt = this.now() + RETRY_MS;
+        this.unconfirmed = true;
+        this.nextSaveAt = this.retryOnFailure ? this.now() : this.now() + RETRY_MS;
+        this.retryOnFailure = false;
         this.saveQueued = false;
+      } else if (error instanceof TycoonApiError && error.failure.kind === "out_of_sync") {
+        // Only this tab saves with this session, so a save of ours landed without us hearing
+        // back. Anything since it is at most a moment's play (see resume()).
+        void this.resync();
       } else {
         this.stop(error);
       }
@@ -472,6 +515,16 @@ export class TycoonController {
       this.saving = false;
       this.changed();
     }
+  }
+
+  /**
+   * Call when the page is shown again. A save cut off while it was hidden gets retried now,
+   * before there is much new play riding on it, rather than in RETRY_MS.
+   */
+  resume() {
+    if (!this.playing) return;
+    if (this.inflight) this.retryOnFailure = true;
+    else if (this.unconfirmed) void this.save();
   }
 
   private stop(error: unknown) {
