@@ -1,4 +1,4 @@
-import { MAX_CLICKS_PER_SECOND, replay, type SaveLog } from "./replay";
+import { MAX_CLICKS_PER_SECOND, replay, type SaveLog, type Undone } from "./replay";
 import {
   RULES_VERSION,
   advance,
@@ -51,6 +51,8 @@ export interface SaveAck {
   state: GameState;
   seq: number;
   dropped: number;
+  /** What the server undid and why (missing from older Workers). */
+  undone?: Undone[];
   creditedMs: number;
 }
 
@@ -210,7 +212,7 @@ export type GameEvent =
   | { type: "achievement"; ids: string[] }
   | { type: "migrate" }
   | { type: "ending" }
-  | { type: "dropped"; count: number };
+  | { type: "dropped"; count: number; undone: Undone[] };
 
 export type Status =
   { kind: "loading" } | { kind: "playing" } | { kind: "stopped"; failure: ApiFailure };
@@ -242,15 +244,18 @@ export class TycoonController {
   private saveQueued = false;
   /**
    * A save failed on the network, so it may or may not have reached the server: how many of
-   * `pending.actions` it carried (they stay at the front of the log for the retry).
+   * `pending.actions` it carried (they stay at the front of the log for the retry) and how long
+   * after `pending.start` it was sent.
    */
-  private unconfirmed: number | null = null;
+  private unconfirmed: { count: number; elapsed: number } | null = null;
   /** The page came back while that save was in flight: if it fails, retry at once. */
   private retryOnFailure = false;
   /** A resync is fetching a fresh session; saves wait for it. */
   private resyncing = false;
   private lastTick = 0;
   private clickTokens = MAX_CLICKS_PER_SECOND;
+  /** How many clicks the newest click entry may hold (see click()). */
+  private clickEntryBudget = 0;
   private nextSaveAt = 0;
   private version = 0;
   private startAttempt = 0;
@@ -404,14 +409,25 @@ export class TycoonController {
     this.tick();
     // The same budget the server allows (replay.ts), so the two never disagree.
     if (this.clickTokens < 1) return { ok: false, reason: "click_rate" };
+    const tokens = this.clickTokens;
     this.clickTokens -= 1;
     const now = this.now();
     const last = this.pending.actions.at(-1);
     const before = this.local.achievements.length;
     const outcome = apply(this.local, { t: 0, a: "click", n: 1 });
     if (!outcome.ok) return outcome;
-    if (last?.a === "click" && now - this.pending.start - last.t < CLICK_MERGE_MS) last.n += 1;
-    else this.pending.actions.push({ t: now - this.pending.start, a: "click", n: 1 });
+    // The server spends a merged entry's clicks all at its time, so an entry may only hold what
+    // the budget had when it began; past that, start a new entry (later, with the budget refilled).
+    if (
+      last?.a === "click" &&
+      now - this.pending.start - last.t < CLICK_MERGE_MS &&
+      last.n < this.clickEntryBudget
+    ) {
+      last.n += 1;
+    } else {
+      this.pending.actions.push({ t: now - this.pending.start, a: "click", n: 1 });
+      this.clickEntryBudget = Math.floor(tokens);
+    }
     this.announceAchievements(before);
     this.emit({ type: "click", earned: outcome.earned ?? 0, count: 1 });
     this.changed();
@@ -499,7 +515,9 @@ export class TycoonController {
       this.unconfirmed = null;
       this.retryOnFailure = false;
       this.lastSavedAt = this.wallClock();
-      if (ack.dropped > 0) this.emit({ type: "dropped", count: ack.dropped });
+      if (ack.dropped > 0) {
+        this.emit({ type: "dropped", count: ack.dropped, undone: ack.undone ?? [] });
+      }
       // Rebuild: the server's state at the cut, plus what happened since.
       const cutoff = this.now();
       const rebuilt = replay(ack.state, {
@@ -519,7 +537,7 @@ export class TycoonController {
             ...this.pending.actions.map((a) => ({ ...a, t: a.t + shift })),
           ],
         };
-        this.unconfirmed = sent.actions.length;
+        this.unconfirmed = { count: sent.actions.length, elapsed: sent.elapsed };
         this.nextSaveAt = this.retryOnFailure ? this.now() : this.now() + RETRY_MS;
         this.retryOnFailure = false;
         this.saveQueued = false;
@@ -541,20 +559,18 @@ export class TycoonController {
    * Picks up from `saved` when it is the save we never heard back from, keeping the actions
    * after it. `sent` is the retry the server refused. False when that can't be done safely.
    */
-  private recover(
-    sent: { start: number; elapsed: number; actions: Action[] },
-    saved?: SavedPoint,
-  ): boolean {
-    const carried = this.unconfirmed;
-    if (!saved || carried === null || saved.seq !== this.seq + 1) return false;
+  private recover(sent: { start: number; actions: Action[] }, saved?: SavedPoint): boolean {
+    const lost = this.unconfirmed;
+    if (!saved || lost === null || saved.seq !== this.seq + 1) return false;
     // The whole log since the last save we heard about, then the part after the lost save.
     const shift = this.pending.start - sent.start;
     const all = [...sent.actions, ...this.pending.actions.map((a) => ({ ...a, t: a.t + shift }))];
     const now = this.now();
-    // The server measured its save's age when the retry arrived, just after we sent it.
-    const start = Math.max(sent.start, sent.start + sent.elapsed - saved.ageMs);
+    // The lost save covered play up to when it was sent; what follows starts from there. (Our own
+    // clock, not the server's age of the save: a phone's clock can stand still while suspended.)
+    const start = sent.start + lost.elapsed;
     const since = all
-      .slice(carried)
+      .slice(lost.count)
       .map((a) => ({ ...a, t: Math.max(0, a.t - (start - sent.start)) }));
     this.seq = saved.seq;
     this.unconfirmed = null;

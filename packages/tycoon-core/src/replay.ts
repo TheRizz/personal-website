@@ -16,6 +16,30 @@ export interface Dropped {
   /** Index into `log.actions`. */
   index: number;
   reason: string;
+  /** For a click entry: how many of its clicks were lost. */
+  clicks?: number;
+}
+
+/** What a save undid, grouped for telling the player: e.g. 12 clicks for "click_rate". */
+export interface Undone {
+  a: Action["a"];
+  reason: string;
+  /** Actions, or clicks for "click". */
+  count: number;
+}
+
+/** Groups `dropped` (from replaying `log`) into what the player lost. */
+export function summariseDropped(log: SaveLog, dropped: Dropped[]): Undone[] {
+  const groups = new Map<string, Undone>();
+  for (const d of dropped) {
+    const action = log.actions[d.index];
+    if (!action) continue;
+    const key = `${action.a}/${d.reason}`;
+    const group = groups.get(key) ?? { a: action.a, reason: d.reason, count: 0 };
+    group.count += action.a === "click" ? (d.clicks ?? action.n) : 1;
+    groups.set(key, group);
+  }
+  return [...groups.values()];
 }
 
 export interface ReplayResult {
@@ -60,14 +84,16 @@ export function replay(start: GameState, log: SaveLog, maxCreditMs = Infinity): 
     if (action.a === "click") {
       const allowed = Math.min(action.n, Math.floor(clickTokens));
       if (allowed < 1) {
-        dropped.push({ index, reason: "click_rate" });
+        dropped.push({ index, reason: "click_rate", clicks: action.n });
         return;
       }
       const outcome = apply(state, { ...action, n: allowed });
-      if (!outcome.ok) dropped.push({ index, reason: outcome.reason });
+      if (!outcome.ok) dropped.push({ index, reason: outcome.reason, clicks: action.n });
       else {
         clickTokens -= allowed;
-        if (allowed < action.n) dropped.push({ index, reason: "click_rate" });
+        if (allowed < action.n) {
+          dropped.push({ index, reason: "click_rate", clicks: action.n - allowed });
+        }
       }
       return;
     }

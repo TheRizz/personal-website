@@ -25,6 +25,7 @@ import {
   newGame,
   newGoldenSeed,
   replay,
+  summariseDropped,
   saveRequestSchema,
   sessionRequestSchema,
   upgradeState,
@@ -222,7 +223,13 @@ async function save(request: Request, env: TycoonEnv, now: number): Promise<Resp
     return jsonError(409, "out_of_sync", "This save is out of date. Reload to continue.");
   }
   return Response.json(
-    { state: result.state, seq, dropped: result.dropped.length, creditedMs: result.creditedMs },
+    {
+      state: result.state,
+      seq,
+      dropped: result.dropped.length,
+      undone: summariseDropped(body.data.log, result.dropped),
+      creditedMs: result.creditedMs,
+    },
     { headers: noStore },
   );
 }
