@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { ACHIEVEMENTS, ENDING_UPGRADE, GENERATORS, UPGRADES } from "./data";
-import { formatDuration, formatShort } from "./format";
+import { describeUndone, formatDuration, formatShort } from "./format";
 import { goldenSpawn, upcomingGolden } from "./golden";
 import {
   OFFLINE_CAP_MS,
@@ -24,7 +24,7 @@ import {
   type Action,
   type GameState,
 } from "./rules";
-import { MAX_CLICKS_PER_SECOND, applyOffline, replay } from "./replay";
+import { MAX_CLICKS_PER_SECOND, applyOffline, replay, summariseDropped } from "./replay";
 import { gameStateSchema, saveLogSchema, upgradeState } from "./schema";
 
 /** A mid-game state: some of every tier and a fat bank. */
@@ -286,5 +286,27 @@ describe("format", () => {
     expect(formatShort(12_345)).toBe("12.3K");
     expect(formatShort(1.5e9)).toBe("1.50B");
     expect(formatDuration(3_725_000)).toBe("1h 2m");
+  });
+});
+
+describe("undone actions", () => {
+  it("counts lost clicks and dropped purchases, and says why", () => {
+    const log = {
+      elapsed: 1_000,
+      actions: [
+        { t: 0, a: "click" as const, n: 30 },
+        { t: 10, a: "buy" as const, g: GENERATORS.length - 1, n: 1 },
+      ],
+    };
+    const result = replay(newGame(), log);
+    const undone = summariseDropped(log, result.dropped);
+    expect(undone).toEqual([
+      { a: "click", reason: "click_rate", count: 30 - MAX_CLICKS_PER_SECOND },
+      { a: "buy", reason: "too_expensive", count: 1 },
+    ]);
+    expect(describeUndone(undone)).toBe(
+      `The server undid 10 clicks (faster than ${MAX_CLICKS_PER_SECOND} a second) and 1 purchase (not enough records by the server's count).`,
+    );
+    expect(describeUndone([])).toBe("Some actions didn't sync with the server and were undone.");
   });
 });

@@ -2,6 +2,7 @@ import {
   ACHIEVEMENTS,
   TycoonController,
   formatDuration,
+  describeUndone,
   formatShort,
   upcomingGolden,
   type GameEvent,
@@ -126,7 +127,7 @@ export async function play(options: PlayOptions): Promise<number> {
         say("Migrated. Fresh platform, bigger multiplier.");
         break;
       case "dropped":
-        say("Some actions didn't sync with the server and were undone.");
+        say(describeUndone(event.undone));
         break;
       case "ending":
         startEnding();

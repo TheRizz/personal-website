@@ -12,6 +12,7 @@ import {
   currentRate,
   formatDuration,
   formatLong,
+  describeUndone,
   formatShort,
   generatorCost,
   migrationGain,
@@ -108,8 +109,7 @@ export function TycoonGame() {
         const names = event.ids.map((id) => ACHIEVEMENTS.find((a) => a.id === id)?.name ?? id);
         show(`Achievement: ${names.join(", ")} (+1 %)`);
       }
-      if (event.type === "dropped")
-        show("Some actions didn't sync with the server and were undone.");
+      if (event.type === "dropped") show(describeUndone(event.undone));
       if (event.type === "ending") setEnding(true);
     });
     return () => {

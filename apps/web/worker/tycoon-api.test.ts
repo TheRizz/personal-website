@@ -153,6 +153,7 @@ describe("saves", () => {
     const s = await session(auth, 0);
     const result = await save(auth, 5_000, s, 5_000, [{ t: 4_000, a: "buy", g: 9, n: 1 }]);
     expect(result.json.dropped).toBe(1);
+    expect(result.json.undone).toEqual([{ a: "buy", reason: "too_expensive", count: 1 }]);
     expect(result.json.state.owned[9]).toBe(0);
   });
 

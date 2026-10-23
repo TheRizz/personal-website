@@ -138,6 +138,24 @@ describe("TycoonController", () => {
     expect(server.logs[0]!.actions).toEqual([{ t: 1, a: "click", n: 20 }]);
   });
 
+  it("never logs a burst of clicks the server would cut short", async () => {
+    const { server, controller, advance } = setup();
+    await controller.start();
+    const dropped: number[] = [];
+    controller.onEvent((e) => e.type === "dropped" && dropped.push(e.count));
+    // Mashing at 40 a second: the client allows the 20 burst plus what refills meanwhile.
+    let accepted = 0;
+    for (let i = 0; i < 40; i++) {
+      advance(25);
+      if (controller.click().ok) accepted++;
+    }
+    expect(accepted).toBeGreaterThan(20);
+    await controller.save();
+    expect(dropped).toEqual([]);
+    expect(server.state.clicks).toBe(accepted);
+    expect(server.logs[0]!.actions.every((a) => a.a !== "click" || a.n <= 20)).toBe(true);
+  });
+
   it("saves on its own every 5 minutes", async () => {
     const { server, controller, advance } = setup();
     await controller.start();

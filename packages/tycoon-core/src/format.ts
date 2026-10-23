@@ -1,3 +1,5 @@
+import { MAX_CLICKS_PER_SECOND, type Undone } from "./replay";
+
 const SUFFIXES = ["", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc"];
 const NAMES = [
   "",
@@ -44,4 +46,33 @@ export function formatDuration(ms: number): string {
   if (hours > 0) return `${hours}h ${minutes}m`;
   if (totalMinutes > 0) return `${minutes}m`;
   return `${Math.floor(ms / 1000)}s`;
+}
+
+const UNDONE_NOUNS: Record<Undone["a"], [string, string]> = {
+  click: ["click", "clicks"],
+  buy: ["purchase", "purchases"],
+  up: ["upgrade", "upgrades"],
+  gold: ["golden packet", "golden packets"],
+  migrate: ["migration", "migrations"],
+};
+
+const UNDONE_REASONS: Record<string, string> = {
+  click_rate: `faster than ${MAX_CLICKS_PER_SECOND} a second`,
+  too_expensive: "not enough records by the server's count",
+  unavailable: "not unlocked yet by the server's count",
+  not_visible: "not on screen by the server's clock",
+  gone: "already caught",
+  too_early: "not enough progress by the server's count",
+};
+
+/** "The server undid 12 clicks (faster than 20 a second) and 1 purchase (…)." */
+export function describeUndone(undone: Undone[]): string {
+  if (undone.length === 0) return "Some actions didn't sync with the server and were undone.";
+  const parts = undone.map(({ a, reason, count }) => {
+    const [one, many] = UNDONE_NOUNS[a];
+    return `${count} ${count === 1 ? one : many} (${UNDONE_REASONS[reason] ?? reason})`;
+  });
+  const list =
+    parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
+  return `The server undid ${list}.`;
 }
