@@ -15,7 +15,7 @@ function watchErrors(page: Page, allowed: RegExp[] = []) {
   return errors;
 }
 
-const records = (page: Page) => page.getByTestId("tycoon").locator("p.text-3xl");
+const records = (page: Page) => page.getByTestId("records");
 
 async function play(page: Page) {
   await page.goto("/games/pipeline-tycoon");
@@ -238,4 +238,45 @@ test("a save whose reply is lost mid-play keeps everything played since", async 
   await play(page);
   await expect(page.getByRole("button", { name: /Intern/ })).toContainText(/Intern\s*1/);
   expect(errors).toEqual([]);
+});
+
+test("Max buys every intern the bank allows and the shop shows what's next", async ({ page }) => {
+  const errors = watchErrors(page);
+  const scene = await play(page);
+  await scene.focus();
+  // 20 clicks a second at most; 2.5 s of clicking is ~50 records, enough for three interns.
+  for (let i = 0; i < 50; i++) {
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(55);
+  }
+  const intern = page.getByRole("button", { name: /Intern/ });
+  await page
+    .getByRole("group", { name: "Buy amount" })
+    .getByRole("button", { name: "Max" })
+    .click();
+  await expect(intern).toContainText(/\d+ for \d+/);
+  await intern.click();
+  const owned = Number(await intern.getByLabel(/owned$/).textContent());
+  expect(owned).toBeGreaterThanOrEqual(2);
+  await expect(intern).toContainText(`${owned}/10 unlocks ×2`);
+  // Production has started, so the next intern says how long it is away.
+  await expect(intern).toContainText(/in \d+(s|m)/);
+  await expect(intern).toContainText(/\/s · 100 %/);
+
+  await page.getByRole("tab", { name: "Stats" }).click();
+  await expect(page.getByText(/^\d+\/100$/).first()).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test("a tab running an old build offers to save and reload", async ({ page }) => {
+  await page.route("**/api/health", (route) =>
+    route.fulfill({ json: { ok: true, version: "a-newer-build" } }),
+  );
+  await play(page);
+  await expect(page.getByText("A new version of Pipeline Tycoon is out.")).toBeVisible();
+  const saved = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/save"));
+  await page.getByRole("button", { name: "Save and reload" }).click();
+  await saved;
+  await page.waitForLoadState("load");
+  await expect(page.getByRole("button", { name: /^Factory/ })).toBeVisible();
 });
