@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { ACHIEVEMENTS, ENDING_UPGRADE, GENERATORS, UPGRADES } from "./data";
-import { describeUndone, formatDuration, formatShort } from "./format";
+import { describeUndone, formatDuration, formatNumber, formatShort } from "./format";
 import { goldenSpawn, upcomingGolden } from "./golden";
 import {
   OFFLINE_CAP_MS,
@@ -286,6 +286,20 @@ describe("format", () => {
     expect(formatShort(12_345)).toBe("12.3K");
     expect(formatShort(1.5e9)).toBe("1.50B");
     expect(formatDuration(3_725_000)).toBe("1h 2m");
+  });
+
+  it("writes numbers in the notation picked in settings", () => {
+    expect(formatNumber(1.5e9, "short")).toBe("1.50B");
+    expect(formatNumber(1.5e9, "long")).toBe("1.50 billion");
+    expect(formatNumber(12_345, "long")).toBe("12.3 thousand");
+    expect(formatNumber(1.5e9, "scientific")).toBe("1.50e9");
+    expect(formatNumber(123_456, "scientific")).toBe("1.23e5");
+    expect(formatNumber(9.996e9, "scientific")).toBe("1.00e10");
+    // Small numbers read the same everywhere.
+    for (const notation of ["short", "long", "scientific"] as const) {
+      expect(formatNumber(950, notation)).toBe("950");
+      expect(formatNumber(2.5, notation)).toBe("2.5");
+    }
   });
 });
 

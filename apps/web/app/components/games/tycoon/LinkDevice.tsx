@@ -27,26 +27,47 @@ function useCountdown(until: number | null) {
   return until === null ? 0 : Math.max(0, until - now);
 }
 
-export function LinkDevice({ controller }: { controller: TycoonController }) {
+/** A one-time link code from the server and how long it has left. */
+export function usePairingCode() {
   const [code, setCode] = useState<{ code: string; until: number } | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const left = useCountdown(code?.until ?? null);
   const expired = code !== null && left === 0;
 
-  async function showCode() {
+  /** Resolves to the new code, or null (with `error` set) when the server couldn't make one. */
+  async function showCode(): Promise<string | null> {
     setBusy(true);
     setError(null);
     try {
       const created = await tycoonClient.createPairingCode();
       setCode({ code: created.code, until: Date.now() + created.expiresInMs });
+      return created.code;
     } catch (e) {
       setError(failureMessage(e));
+      return null;
     } finally {
       setBusy(false);
     }
   }
+
+  const minutes = Math.floor(left / 60_000);
+  const seconds = Math.floor((left % 60_000) / 1000)
+    .toString()
+    .padStart(2, "0");
+  return {
+    code: expired ? null : (code?.code ?? null),
+    expired,
+    busy,
+    error,
+    showCode,
+    left: `${minutes}:${seconds}`,
+  };
+}
+
+export function LinkDevice({ controller }: { controller: TycoonController }) {
+  const { code, expired, busy, error, showCode, left } = usePairingCode();
+  const [copied, setCopied] = useState(false);
 
   async function copy(text: string) {
     try {
@@ -58,11 +79,7 @@ export function LinkDevice({ controller }: { controller: TycoonController }) {
     }
   }
 
-  const command = code ? `${CLI_COMMAND} link ${code.code}` : "";
-  const minutes = Math.floor(left / 60_000);
-  const seconds = Math.floor((left % 60_000) / 1000)
-    .toString()
-    .padStart(2, "0");
+  const command = code ? `${CLI_COMMAND} link ${code}` : "";
 
   return (
     <section className="mt-5 rounded-lg border border-line p-3" aria-labelledby="link-heading">
@@ -73,13 +90,13 @@ export function LinkDevice({ controller }: { controller: TycoonController }) {
         The same game, the same save, as a terminal schematic. Show a code, then run the command on
         any computer with Node 20+.
       </p>
-      {code && !expired ? (
+      {code ? (
         <div className="mt-3">
           <p
             className="font-mono text-2xl font-bold tracking-[0.3em] text-accent"
-            aria-label={`Code ${code.code.split("").join(" ")}`}
+            aria-label={`Code ${code.split("").join(" ")}`}
           >
-            {code.code.slice(0, 3)} {code.code.slice(3)}
+            {code.slice(0, 3)} {code.slice(3)}
           </p>
           <div className="mt-2 flex items-center gap-2 rounded-md border border-line bg-surface px-2 py-1.5">
             <code className="min-w-0 flex-1 font-mono text-[0.75rem] break-all text-fg">
@@ -93,9 +110,7 @@ export function LinkDevice({ controller }: { controller: TycoonController }) {
               {copied ? <Check /> : <Copy />}
             </button>
           </div>
-          <p className="mt-1 font-mono text-xs text-muted">
-            Works once, for {minutes}:{seconds}
-          </p>
+          <p className="mt-1 font-mono text-xs text-muted">Works once, for {left}</p>
         </div>
       ) : (
         <button

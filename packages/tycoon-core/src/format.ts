@@ -38,6 +38,29 @@ export function formatLong(value: number): string {
   return `${(value / 1000 ** group).toFixed(3)} ${NAMES[group]}`;
 }
 
+/** How the shop and scene write big numbers; picked in the web game's settings. */
+export type Notation = "short" | "long" | "scientific";
+export const NOTATIONS: readonly Notation[] = ["short", "long", "scientific"];
+
+/** 1.5e9 → "1.50B" (short), "1.50 billion" (long) or "1.50e9" (scientific). */
+export function formatNumber(value: number, notation: Notation): string {
+  if (notation === "short" || !Number.isFinite(value) || Math.abs(value) < 1000) {
+    return formatShort(value);
+  }
+  if (notation === "scientific") {
+    const exponent = Math.floor(Math.log10(Math.abs(value)));
+    const mantissa = Math.round((value / 10 ** exponent) * 100) / 100;
+    // 9.996e9 rounds up to 10.00; write it as 1.00e10.
+    return Math.abs(mantissa) >= 10
+      ? `${(mantissa / 10).toFixed(2)}e${exponent + 1}`
+      : `${mantissa.toFixed(2)}e${exponent}`;
+  }
+  const group = Math.min(Math.floor(Math.log10(Math.abs(value)) / 3), NAMES.length - 1);
+  const scaled = value / 1000 ** group;
+  const digits = scaled >= 100 ? 0 : scaled >= 10 ? 1 : 2;
+  return `${scaled.toFixed(digits)} ${NAMES[group]}`;
+}
+
 /** 3_725_000 ms → "1h 2m". */
 export function formatDuration(ms: number): string {
   const totalMinutes = Math.floor(ms / 60_000);

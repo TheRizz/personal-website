@@ -280,3 +280,61 @@ test("a tab running an old build offers to save and reload", async ({ page }) =>
   await page.waitForLoadState("load");
   await expect(page.getByRole("button", { name: /^Factory/ })).toBeVisible();
 });
+
+test("settings change how numbers are written and are remembered", async ({ page, context }) => {
+  const errors = watchErrors(page, [/Failed to fetch manifest patches/]);
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  await play(page);
+  await page.getByRole("tab", { name: "Migrate" }).click();
+  await expect(page.getByText(/^Next point at [\d.]+[KMB] records/)).toBeVisible();
+
+  await page.getByRole("button", { name: "Settings" }).click();
+  const sheet = page.getByRole("dialog", { name: "Settings" });
+  await sheet.getByText("Long").click();
+  await expect(
+    page.getByText(/^Next point at [\d.]+ (thousand|million|billion) records/),
+  ).toBeVisible();
+  await sheet.getByRole("switch", { name: "Reduce motion" }).click();
+  await expect(sheet.getByRole("switch", { name: "Reduce motion" })).toBeChecked();
+
+  // The save code is the same one-time link code the Stats tab shows, copied in one tap.
+  await sheet.getByRole("button", { name: "Copy my save code" }).click();
+  const code = (await sheet.getByTestId("save-code").textContent())!.replace(" ", "");
+  expect(code).toMatch(/^[A-Z0-9]{6}$/);
+  await expect(sheet).toContainText("Copied.");
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(code);
+
+  await page.keyboard.press("Escape");
+  await expect(sheet).toBeHidden();
+
+  await page.waitForLoadState("networkidle");
+  await page.reload();
+  await play(page);
+  await page.getByRole("button", { name: "Settings" }).click();
+  await expect(sheet.getByRole("radio", { name: /Long/ })).toBeChecked();
+  await expect(sheet.getByRole("switch", { name: "Reduce motion" })).toBeChecked();
+  expect(errors).toEqual([]);
+});
+
+test.describe("on a phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("sound moves into the settings sheet", async ({ page }) => {
+    const errors = watchErrors(page);
+    await play(page);
+    await expect(page.getByRole("button", { name: "Turn sound on" })).toBeHidden();
+    await page.getByRole("button", { name: "Settings" }).tap();
+    const sheet = page.getByRole("dialog", { name: "Settings" });
+    const sound = sheet.getByRole("switch", { name: "Sound" });
+    await expect(sound).not.toBeChecked();
+    await sound.tap();
+    await expect(sound).toBeChecked();
+    // The sheet sits on the bottom edge of the screen.
+    const box = (await sheet.boundingBox())!;
+    expect(Math.round(box.y + box.height)).toBe(844);
+    await page.screenshot({ path: "test-results/tycoon-settings-phone.png" });
+    await sheet.getByRole("button", { name: "Close settings" }).tap();
+    await expect(sheet).toBeHidden();
+    expect(errors).toEqual([]);
+  });
+});
