@@ -89,7 +89,18 @@ jobs:
             pnpm content --check-images
           fi
       - run: pnpm db:migrate:local
-      - run: pnpm exec playwright install --with-deps --only-shell chromium
+      # The browser is cached per Playwright version, and the runner image already has the system
+      # libraries Chromium needs, so a run skips both the download and apt (3.5 min uncached).
+      - name: Playwright version
+        id: playwright
+        run: echo "version=$(node -p 'require("@playwright/test/package.json").version')" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        id: browser-cache
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.playwright.outputs.version }}-chromium-shell
+      - if: steps.browser-cache.outputs.cache-hit != 'true'
+        run: pnpm exec playwright install --only-shell chromium
       - run: pnpm e2e
         env:
           CI: true
