@@ -10,51 +10,47 @@ old tabs are told to reload, and the CLI needs a new release (docs/04-pipeline-t
 
 ## Up next
 
-1. **Settings panel** (M, UI, no rules bump). A gear in the stats bar opening a small sheet:
-   sound, number notation (short "1.2 B", long "1.2 billion", scientific "1.2e9"), reduce motion
-   in the scene, and "Copy my save code" (the existing link code flow, surfaced). Kept in
-   localStorage. Move the lone mute button into it on phones.
-2. **First-time hints** (S, UI, no rules bump). Three one-line tips shown once each, in the scene's
+1. **First-time hints** (S, UI, no rules bump). Three one-line tips shown once each, in the scene's
    toast: "Tap the core", "Buy an intern, it works while you don't", "Upgrades tab has something
    for you". Dismissed for good after they fire; nothing on a returning save.
-3. **Game fits one phone screen** (M, UI, no rules bump). On a 390 × 844 phone the scene, counter
+2. **Game fits one phone screen** (M, UI, no rules bump). On a 390 × 844 phone the scene, counter
    and at least two shop rows show together after one scroll; today the page heading and stats
    take about half the first screen. Overlay the counter on the scene's top edge and shorten the
    scene to about 38 % of the box on phones. Check Safari's dynamic toolbar (`dvh`).
-4. **Golden packet you can't miss** (S, UI, no rules bump). Pulse the packet's trail, add a soft
+3. **Golden packet you can't miss** (S, UI, no rules bump). Pulse the packet's trail, add a soft
    chime when sound is on, and show its remaining time as a ring; respect reduced motion.
-5. **Keyboard help** (S, UI, no rules bump). `?` opens a small list of keys (space, 1–0, x for
+4. **Keyboard help** (S, UI, no rules bump). `?` opens a small list of keys (space, 1–0, x for
    amount, tab switching, g to catch a golden packet like the CLI); mention it in the hint line.
-6. **Install on the home screen** (M, no rules bump). A web app manifest scoped to
+5. **Install on the home screen** (M, no rules bump). A web app manifest scoped to
    `/games/pipeline-tycoon` with an icon drawn from the core node, `display: standalone`, and
    theme colour from the scene, so iPhone "Add to Home Screen" opens the game full screen.
-7. **Unsaved-play safety net** (M, save robustness). Keep the pending action log in localStorage
+6. **Unsaved-play safety net** (M, save robustness). Keep the pending action log in localStorage
    between saves so a killed tab (iOS memory pressure) does not lose up to 5 minutes; on the next
    load, send it as the first save of the new session if the server's seq still matches, otherwise
    drop it. Needs a careful server-side check and e2e test; read ADR-0006 first.
-8. **Performance pass** (M). Cap live packets and particles at high tiers, measure frame time at
+7. **Performance pass** (M). Cap live packets and particles at high tiers, measure frame time at
    iPhone width with CPU throttling in Playwright, record before/after numbers in the PR. (Phaser
    already pauses itself when the tab is hidden.)
-9. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
+8. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
    own 100 interns and nothing else, migrate with exactly 1 AP, 10 minutes without clicking, buy
    an upgrade within a second of affording it, own one of every tier, reach the ending without
    clicking after the first migration. Batch with another rules-bump item when possible.
-10. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
-    cap to 12 h then 24 h. Needs a "spend AP" control in the Migrate tab (AP stay a production
-    bonus otherwise).
-11. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
+9. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
+   cap to 12 h then 24 h. Needs a "spend AP" control in the Migrate tab (AP stay a production
+   bonus otherwise).
+10. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
     time between purchases, look for walls of more than ~3 minutes with nothing to buy; retune only
     inside the pacing test's targets.
-12. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
+11. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
     `[A-Za-z0-9_]`, profanity filter), top 50 by lifetime Records, cached a few minutes. New
     expand-only migration in `apps/web/migrations-tycoon/` (deploy applies it).
-13. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
+12. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
     board; CLI panel.
-14. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
-15. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
+13. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
+14. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
     using the Web Share API on phones (copy to clipboard elsewhere): "I migrated my data platform
     3 times and processed 4.2 trillion records in Pipeline Tycoon" with the page link.
-16. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
+15. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
     the two stay alike; patch release, Ryan pushes the tag.
 
 ## Needs Ryan first
@@ -72,6 +68,9 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
+- 2026-10-29 (in PR #40): settings panel. A gear next to the records opens a sheet with sound,
+  number style (short, long, scientific), reduce motion for the scene, and "Copy my save code";
+  kept in this browser. On phones the mute button lives in the sheet.
 - 2026-10-29 (PR #39, built in the project thread): Buy Max; "in 2m" wait time on every
   generator and upgrade you can't afford yet; each generator shows its output and share of
   production, and a bar to its next ×2 milestone; locked achievements show progress; a dot on the
@@ -85,6 +84,7 @@ Runs skip these until Ryan writes a decision under the item.
 One line per run: date (UTC), what happened, PR link.
 
 - 2026-10-29: backlog created; first batch built in the project thread (PR #39).
+- 2026-10-29: settings panel (scheduled run, [PR #40](https://github.com/TheRizz/personal-website/pull/40)).
 
 ## How the scheduled runs work
 

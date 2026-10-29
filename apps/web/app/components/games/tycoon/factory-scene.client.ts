@@ -2,7 +2,7 @@ import * as Phaser from "phaser";
 import {
   GENERATORS,
   clickValue,
-  formatShort,
+  formatNumber,
   overclocked,
   tierRate,
   upcomingGolden,
@@ -12,6 +12,7 @@ import {
 } from "@site/tycoon-core";
 
 import { TIER_COLOURS } from "./colours";
+import type { TycoonSettings } from "./settings";
 
 // The live "factory": a dark neon schematic drawn in code (no image assets, so the CSP needs no
 // data:/blob: textures). Tiers appear as nodes around the core as you buy them, links glow, and
@@ -43,6 +44,7 @@ const LABELS = ["CSV", "CRON", "SFTP", "REST", "MQ", "ETL", "LAKE", "MESH", "SAT
 
 class FactoryScene extends Phaser.Scene {
   private controller!: TycoonController;
+  private settings!: () => TycoonSettings;
   private graphics!: Phaser.GameObjects.Graphics;
   private labels: Phaser.GameObjects.Text[] = [];
   private coreLabel!: Phaser.GameObjects.Text;
@@ -58,8 +60,13 @@ class FactoryScene extends Phaser.Scene {
     super("factory");
   }
 
-  init(data: { controller: TycoonController }) {
+  init(data: { controller: TycoonController; settings: () => TycoonSettings }) {
     this.controller = data.controller;
+    this.settings = data.settings;
+  }
+
+  private format(value: number) {
+    return formatNumber(value, this.settings().notation);
   }
 
   create() {
@@ -134,29 +141,32 @@ class FactoryScene extends Phaser.Scene {
         this.floatText(
           cx + Phaser.Math.Between(-20, 20),
           cy - coreRadius - 6,
-          `+${formatShort(event.earned)}`,
+          `+${this.format(event.earned)}`,
           "#a5f3fc",
         );
         break;
       }
       case "buy": {
+        if (this.settings().reduceMotion) break;
         const node = nodes[event.tier];
         if (node) this.bursts.push({ ...node, age: 0, colour: TIER_COLOURS[event.tier] ?? CORE });
         break;
       }
       case "golden": {
-        this.bursts.push({ x: cx, y: cy, age: 0, colour: GOLD });
+        if (!this.settings().reduceMotion) this.bursts.push({ x: cx, y: cy, age: 0, colour: GOLD });
         this.floatText(
           cx,
           cy - coreRadius - 24,
-          event.kind === "burst" ? `+${formatShort(event.earned ?? 0)}` : "OVERCLOCK ×7",
+          event.kind === "burst" ? `+${this.format(event.earned ?? 0)}` : "OVERCLOCK ×7",
           "#fde68a",
         );
         break;
       }
       case "migrate":
         this.packets = [];
-        this.bursts.push({ x: cx, y: cy, age: 0, colour: 0xffffff });
+        if (!this.settings().reduceMotion) {
+          this.bursts.push({ x: cx, y: cy, age: 0, colour: 0xffffff });
+        }
         break;
       default:
         break;
@@ -172,9 +182,11 @@ class FactoryScene extends Phaser.Scene {
         color,
       })
       .setOrigin(0.5);
+    // With reduced motion the number fades where it appeared instead of rising.
+    const still = this.settings().reduceMotion;
     this.tweens.add({
       targets: label,
-      y: y - 40,
+      y: still ? y : y - 40,
       alpha: 0,
       duration: 900,
       ease: "Cubic.easeOut",
@@ -189,6 +201,7 @@ class FactoryScene extends Phaser.Scene {
     g.clear();
     const { width, height, cx, cy, coreRadius, nodes } = this.layout();
     const dt = Math.min(delta, 100) / 1000;
+    const still = this.settings().reduceMotion;
 
     // Background grid.
     g.fillStyle(BG, 1);
@@ -252,8 +265,10 @@ class FactoryScene extends Phaser.Scene {
     });
 
     // The core: the big click target.
-    this.corePulse = Math.max(0, this.corePulse - dt * 4);
-    const pulse = coreRadius * (1 + this.corePulse * 0.12 + Math.sin(this.time.now / 400) * 0.02);
+    this.corePulse = still ? 0 : Math.max(0, this.corePulse - dt * 4);
+    const pulse = still
+      ? coreRadius
+      : coreRadius * (1 + this.corePulse * 0.12 + Math.sin(this.time.now / 400) * 0.02);
     g.fillStyle(coreColour, 0.06);
     g.fillCircle(cx, cy, pulse * 1.9);
     g.fillStyle(coreColour, 0.12);
@@ -265,12 +280,12 @@ class FactoryScene extends Phaser.Scene {
     g.lineStyle(1, coreColour, 0.5);
     g.strokeCircle(cx, cy, pulse * 0.62);
     // A little rotating "processing" arc.
-    const spin = this.time.now / 600;
+    const spin = still ? -Math.PI / 2 : this.time.now / 600;
     g.lineStyle(2, coreColour, 0.9);
     g.beginPath();
     g.arc(cx, cy, pulse * 0.62, spin, spin + Math.PI * 0.6);
     g.strokePath();
-    this.coreLabel.setText(`PROCESS\n+${formatShort(clickValue(state))}`);
+    this.coreLabel.setText(`PROCESS\n+${this.format(clickValue(state))}`);
     const coreFont = coreRadius < 52 ? 10 : 12;
     if (coreFont !== this.coreFont) this.coreLabel.setFontSize((this.coreFont = coreFont));
     this.coreLabel.setPosition(cx, cy - (coreRadius < 52 ? 12 : 14));
@@ -291,7 +306,7 @@ class FactoryScene extends Phaser.Scene {
     // The golden packet, while it's on screen.
     const golden = this.goldenPosition(state, width, height);
     if (golden) {
-      const size = 11 + Math.sin(this.time.now / 120) * 2;
+      const size = still ? 12 : 11 + Math.sin(this.time.now / 120) * 2;
       g.fillStyle(GOLD, 0.18);
       g.fillCircle(golden.x, golden.y, size * 2.2);
       g.fillStyle(GOLD, 1);
@@ -316,7 +331,11 @@ class FactoryScene extends Phaser.Scene {
 }
 
 /** Mounts the scene in `parent`; returns a function that tears it down. */
-export function mountFactory(parent: HTMLElement, controller: TycoonController): () => void {
+export function mountFactory(
+  parent: HTMLElement,
+  controller: TycoonController,
+  settings: () => TycoonSettings,
+): () => void {
   const game = new Phaser.Game({
     type: Phaser.AUTO,
     parent,
@@ -328,6 +347,6 @@ export function mountFactory(parent: HTMLElement, controller: TycoonController):
     render: { antialias: true },
     scene: [],
   });
-  game.scene.add("factory", FactoryScene, true, { controller });
+  game.scene.add("factory", FactoryScene, true, { controller, settings });
   return () => game.destroy(true);
 }

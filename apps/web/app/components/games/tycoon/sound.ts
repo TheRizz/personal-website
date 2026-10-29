@@ -1,26 +1,9 @@
 import type { GameEvent } from "@site/tycoon-core";
 
 // Synthesised blips, no audio files. Muted by default (docs/04-pipeline-tycoon.md §1); the
-// toggle is remembered in localStorage.
+// choice lives in settings.ts.
 
-const MUTED_KEY = "games.tycoon.sound";
 let context: AudioContext | null = null;
-
-export function loadSoundOn(): boolean {
-  try {
-    return window.localStorage.getItem(MUTED_KEY) === "on";
-  } catch {
-    return false;
-  }
-}
-
-export function saveSoundOn(on: boolean) {
-  try {
-    window.localStorage.setItem(MUTED_KEY, on ? "on" : "off");
-  } catch {
-    // Not remembered; fine for this visit.
-  }
-}
 
 /** Creates or resumes the audio context; call from a tap or key press so browsers allow it. */
 export function unlockAudio() {

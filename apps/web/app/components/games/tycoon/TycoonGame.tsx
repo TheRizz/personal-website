@@ -1,4 +1,4 @@
-import { Volume2, VolumeX } from "lucide-react";
+import { Settings, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ACHIEVEMENTS,
@@ -15,7 +15,6 @@ import {
   formatDuration,
   formatLong,
   describeUndone,
-  formatShort,
   generatorCost,
   maxAffordable,
   migrationGain,
@@ -34,7 +33,9 @@ import { primaryButton, secondaryButton } from "~/components/games/ui";
 import { tycoonClient } from "~/lib/games/tycoon/api";
 import { TIER_HEX } from "./colours";
 import { LinkDevice } from "./LinkDevice";
-import { loadSoundOn, playEvent, saveSoundOn, unlockAudio } from "./sound";
+import { SettingsSheet } from "./SettingsSheet";
+import { getSettings, updateSettings, useFormat, useSettings } from "./settings";
+import { playEvent, unlockAudio } from "./sound";
 
 // The page: stats bar, the Phaser factory scene and the HTML shop (docs/04-pipeline-tycoon.md §1).
 // Phones stack scene over a tabbed shop; wider screens put them side by side.
@@ -52,8 +53,6 @@ type BuyAmount = (typeof BUY_AMOUNTS)[number];
 const MAX_PER_ACTION = 100;
 /** How often numbers on the page refresh (the scene redraws every frame on its own). */
 const UI_REFRESH_MS = 125;
-
-const subscribeNothing = () => () => {};
 
 /** How many of a tier one press buys: the chosen amount, or whatever the bank allows for Max. */
 function buyCount(state: GameState, tier: number, amount: BuyAmount): number {
@@ -80,9 +79,9 @@ export function TycoonGame() {
   const [tab, setTab] = useState<Tab>("generators");
   const [buyAmount, setBuyAmount] = useState<BuyAmount>(1);
   const newVersion = useNewVersion();
-  const savedSound = useSyncExternalStore(subscribeNothing, loadSoundOn, () => false);
-  const [soundChoice, setSoundChoice] = useState<boolean | null>(null);
-  const soundOn = soundChoice ?? savedSound;
+  const { sound: soundOn } = useSettings();
+  const fmt = useFormat();
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
 
@@ -117,7 +116,7 @@ export function TycoonGame() {
     let unmount: (() => void) | null = null;
     let cancelled = false;
     void import("./factory-scene.client").then(({ mountFactory }) => {
-      if (!cancelled) unmount = mountFactory(parent, controller);
+      if (!cancelled) unmount = mountFactory(parent, controller, getSettings);
     });
     return () => {
       cancelled = true;
@@ -153,8 +152,7 @@ export function TycoonGame() {
   function toggleSound() {
     const next = !soundOn;
     if (next) unlockAudio();
-    saveSoundOn(next);
-    setSoundChoice(next);
+    updateSettings({ sound: next });
   }
 
   function onSceneKey(event: React.KeyboardEvent) {
@@ -197,8 +195,10 @@ export function TycoonGame() {
         state={state}
         soundOn={soundOn}
         onToggleSound={toggleSound}
+        onOpenSettings={() => setSettingsOpen(true)}
         saving={controller.saving}
       />
+      <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
       <div className="flex h-[calc(100dvh-9rem)] min-h-[34rem] flex-col overflow-hidden rounded-xl border border-line lg:grid lg:h-[40rem] lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-1">
         <div
@@ -272,8 +272,7 @@ export function TycoonGame() {
           <h2 className="text-xl font-bold">While you were away</h2>
           <p className="mt-2 text-lg">
             Your pipelines ran for <strong>{formatDuration(controller.offline.ms)}</strong> and
-            processed{" "}
-            <strong className="tabular-nums">{formatShort(controller.offline.earned)}</strong>{" "}
+            processed <strong className="tabular-nums">{fmt(controller.offline.earned)}</strong>{" "}
             records.
           </p>
           {controller.offline.ms >= 8 * 3_600_000 && (
@@ -298,13 +297,16 @@ function StatsBar({
   state,
   soundOn,
   onToggleSound,
+  onOpenSettings,
   saving,
 }: {
   state: GameState | null;
   soundOn: boolean;
   onToggleSound: () => void;
+  onOpenSettings: () => void;
   saving: boolean;
 }) {
+  const fmt = useFormat();
   return (
     <div className="mb-3 flex items-end justify-between gap-4">
       <div className="min-w-0">
@@ -313,22 +315,33 @@ function StatsBar({
           aria-live="off"
           data-testid="records"
         >
-          {state ? formatShort(state.records) : "—"}
+          {state ? fmt(state.records) : "—"}
         </p>
         <p className="mt-1 text-sm text-muted tabular-nums">
-          records{state ? ` · ${formatShort(currentRate(state))} a second` : ""}
+          records{state ? ` · ${fmt(currentRate(state))} a second` : ""}
           {state && state.ap > 0 && <span className="ml-3 text-accent-violet">{state.ap} AP</span>}
           {saving && <span className="ml-3 text-accent/80">saving…</span>}
         </p>
       </div>
-      <button
-        onClick={onToggleSound}
-        aria-pressed={soundOn}
-        aria-label={soundOn ? "Mute sound" : "Turn sound on"}
-        className={secondaryButton}
-      >
-        {soundOn ? <Volume2 /> : <VolumeX />}
-      </button>
+      <div className="flex shrink-0 gap-2">
+        {/* On phones sound lives in the settings sheet, to keep the bar to one button. */}
+        <button
+          onClick={onToggleSound}
+          aria-pressed={soundOn}
+          aria-label={soundOn ? "Mute sound" : "Turn sound on"}
+          className={`${secondaryButton} max-sm:hidden`}
+        >
+          {soundOn ? <Volume2 /> : <VolumeX />}
+        </button>
+        <button
+          onClick={onOpenSettings}
+          aria-label="Settings"
+          aria-haspopup="dialog"
+          className={secondaryButton}
+        >
+          <Settings />
+        </button>
+      </div>
     </div>
   );
 }
@@ -354,6 +367,7 @@ function GeneratorList({
   buyAmount: BuyAmount;
   setBuyAmount: (n: BuyAmount) => void;
 }) {
+  const fmt = useFormat();
   // Owned tiers, plus the next two, so there's always something to aim for.
   const highest = state.owned.reduce((top, n, i) => (n > 0 ? i : top), -1);
   const visible = GENERATORS.slice(0, Math.min(GENERATORS.length, highest + 3));
@@ -417,13 +431,13 @@ function GeneratorList({
                     <span>
                       <span className={canBuy ? "font-semibold text-accent" : "text-muted"}>
                         {buyAmount === "max" && count > 1 ? `${count} for ` : ""}
-                        {formatShort(cost)}
+                        {fmt(cost)}
                       </span>
                       {wait && <span className="text-muted"> · {wait}</span>}
                     </span>
                     {owned > 0 && (
                       <span className="truncate text-muted">
-                        {formatShort(tierRate(state, tier))}/s · {Math.round(share * 100)} %
+                        {fmt(tierRate(state, tier))}/s · {Math.round(share * 100)} %
                       </span>
                     )}
                   </span>
@@ -454,6 +468,7 @@ function GeneratorList({
 }
 
 function UpgradeList({ controller, state }: { controller: TycoonController; state: GameState }) {
+  const fmt = useFormat();
   const upgrades = availableUpgrades(state).sort((a, b) => a.cost - b.cost);
   if (upgrades.length === 0) {
     return (
@@ -482,7 +497,7 @@ function UpgradeList({ controller, state }: { controller: TycoonController; stat
                 <span
                   className={`text-sm tabular-nums ${canBuy ? "font-semibold text-accent" : "text-muted"}`}
                 >
-                  {formatShort(upgrade.cost)}
+                  {fmt(upgrade.cost)}
                 </span>
               </span>
               <span className="block text-[0.8rem] leading-snug text-muted">{upgrade.blurb}</span>
@@ -496,6 +511,7 @@ function UpgradeList({ controller, state }: { controller: TycoonController; stat
 }
 
 function MigratePanel({ controller, state }: { controller: TycoonController; state: GameState }) {
+  const fmt = useFormat();
   const [confirming, setConfirming] = useState(false);
   const gain = migrationGain(state);
   const next = nextPointAt(state);
@@ -514,14 +530,14 @@ function MigratePanel({ controller, state }: { controller: TycoonController; sta
         <dt className="text-muted">Migrating now gives</dt>
         <dd className="text-right text-accent-violet">+{gain} AP</dd>
         <dt className="text-muted">This run</dt>
-        <dd className="text-right">{formatShort(state.runRecords)}</dd>
+        <dd className="text-right">{fmt(state.runRecords)}</dd>
       </dl>
       <div className="mt-3">
         <div className="h-1.5 overflow-hidden rounded-full bg-surface-hover" aria-hidden="true">
           <div className="h-full bg-accent-violet" style={{ width: `${progress * 100}%` }} />
         </div>
         <p className="mt-1 text-xs text-muted tabular-nums">
-          Next point at {formatShort(next)} records this run
+          Next point at {fmt(next)} records this run
         </p>
       </div>
       {confirming ? (
@@ -553,12 +569,13 @@ function MigratePanel({ controller, state }: { controller: TycoonController; sta
 }
 
 function StatsPanel({ controller, state }: { controller: TycoonController; state: GameState }) {
+  const fmt = useFormat();
   const unlocked = new Set(state.achievements);
   const rows: [string, string][] = [
     ["Records ever", formatLong(state.lifetimeRecords)],
-    ["Base production", `${formatShort(baseRate(state))}/s`],
-    ["Best production", `${formatShort(state.bestRate)}/s`],
-    ["Per click", formatShort(clickValue(state))],
+    ["Base production", `${fmt(baseRate(state))}/s`],
+    ["Best production", `${fmt(state.bestRate)}/s`],
+    ["Per click", fmt(clickValue(state))],
     [
       "Permanent bonus",
       `+${Math.round((AP_BONUS * state.ap + ACHIEVEMENT_BONUS * state.achievements.length) * 100)} %`,
@@ -622,8 +639,7 @@ function StatsPanel({ controller, state }: { controller: TycoonController; state
                     />
                   </span>
                   <span>
-                    {formatShort(Math.min(progress.current, progress.target))}/
-                    {formatShort(progress.target)}
+                    {fmt(Math.min(progress.current, progress.target))}/{fmt(progress.target)}
                   </span>
                 </span>
               )}
