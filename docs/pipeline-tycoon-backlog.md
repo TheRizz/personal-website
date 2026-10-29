@@ -68,7 +68,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-10-29 (in PR): settings panel. A gear next to the records opens a sheet with sound,
+- 2026-10-29 (in PR #40): settings panel. A gear next to the records opens a sheet with sound,
   number style (short, long, scientific), reduce motion for the scene, and "Copy my save code";
   kept in this browser. On phones the mute button lives in the sheet.
 - 2026-10-29 (PR #39, built in the project thread): Buy Max; "in 2m" wait time on every
@@ -84,7 +84,7 @@ Runs skip these until Ryan writes a decision under the item.
 One line per run: date (UTC), what happened, PR link.
 
 - 2026-10-29: backlog created; first batch built in the project thread (PR #39).
-- 2026-10-29: settings panel (scheduled run, PR link below once opened).
+- 2026-10-29: settings panel (scheduled run, [PR #40](https://github.com/TheRizz/personal-website/pull/40)).
 
 ## How the scheduled runs work
 
