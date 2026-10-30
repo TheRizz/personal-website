@@ -59,7 +59,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-10-30 (in PR): golden packet you can't miss. It now leaves a pulsing gold trail, wears a
+- 2026-10-30 (in [PR #45](https://github.com/TheRizz/personal-website/pull/45)): golden packet you can't miss. It now leaves a pulsing gold trail, wears a
   ring that empties as its 12 seconds run out, plays a soft chime when it appears (if sound is
   on) and is announced to screen readers. Reduced motion keeps the trail steady.
 - 2026-10-30 ([PR #44](https://github.com/TheRizz/personal-website/pull/44)): offline time in a tab left open. A phone that sleeps with the game open
@@ -110,7 +110,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-10-30: game fits one phone screen, with the label overlap and laptop toast fixes (scheduled
   run, [PR #43](https://github.com/TheRizz/personal-website/pull/43)).
 - 2026-10-30: offline time in a tab left open (scheduled run, [PR #44](https://github.com/TheRizz/personal-website/pull/44)).
-- 2026-10-30: golden packet you can't miss (scheduled run, PR link to follow).
+- 2026-10-30: golden packet you can't miss (scheduled run, [PR #45](https://github.com/TheRizz/personal-website/pull/45)).
 
 ## How the scheduled runs work
 
