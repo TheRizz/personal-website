@@ -1,5 +1,5 @@
 import { Settings, Volume2, VolumeX } from "lucide-react";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
   ACHIEVEMENTS,
   ACHIEVEMENT_BONUS,
@@ -32,6 +32,7 @@ import {
 import { primaryButton, secondaryButton } from "~/components/games/ui";
 import { tycoonClient } from "~/lib/games/tycoon/api";
 import { TIER_HEX } from "./colours";
+import { HINTS, dueHint, isReturning, loadSeenHints, saveSeenHints, type HintId } from "./hints";
 import { LinkDevice } from "./LinkDevice";
 import { SettingsSheet } from "./SettingsSheet";
 import { getSettings, updateSettings, useFormat, useSettings } from "./settings";
@@ -53,6 +54,9 @@ type BuyAmount = (typeof BUY_AMOUNTS)[number];
 const MAX_PER_ACTION = 100;
 /** How often numbers on the page refresh (the scene redraws every frame on its own). */
 const UI_REFRESH_MS = 125;
+const TOAST_MS = 3_500;
+/** First-time tips stay up a little longer than other toasts. */
+const HINT_MS = 5_000;
 
 /** How many of a tier one press buys: the chosen amount, or whatever the bank allows for Max. */
 function buyCount(state: GameState, tier: number, amount: BuyAmount): number {
@@ -124,30 +128,49 @@ export function TycoonGame() {
     };
   }, [playing, controller]);
 
+  const toastTimer = useRef<number | undefined>(undefined);
+  const showToast = useCallback((text: string, ms = TOAST_MS) => {
+    setToast(text);
+    window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), ms);
+  }, []);
+  useEffect(() => () => window.clearTimeout(toastTimer.current), []);
+
   // Sounds, toasts and the ending.
   useEffect(() => {
-    let timer: number | undefined;
-    const show = (text: string) => {
-      setToast(text);
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => setToast(null), 3_500);
-    };
     const off = controller.onEvent((event: GameEvent) => {
       if (soundOn) playEvent(event);
       if (event.type === "achievement") {
         const names = event.ids.map((id) => ACHIEVEMENTS.find((a) => a.id === id)?.name ?? id);
-        show(`Achievement: ${names.join(", ")} (+1 %)`);
+        showToast(`Achievement: ${names.join(", ")} (+1 %)`);
       }
-      if (event.type === "dropped") show(describeUndone(event.undone));
+      if (event.type === "dropped") showToast(describeUndone(event.undone));
       if (event.type === "ending") setEnding(true);
     });
-    return () => {
-      off();
-      window.clearTimeout(timer);
-    };
-  }, [controller, soundOn]);
+    return off;
+  }, [controller, soundOn, showToast]);
 
   const state = controller.local;
+
+  // First-time tips, one at a time when nothing else is on show. A game that already has
+  // progress when the page opens counts every tip as seen.
+  const seenHints = useRef<Set<HintId> | null>(null);
+  useEffect(() => {
+    if (!state || !playing) return;
+    if (!seenHints.current) {
+      seenHints.current = loadSeenHints();
+      if (isReturning(state) && seenHints.current.size < HINTS.length) {
+        HINTS.forEach((hint) => seenHints.current!.add(hint.id));
+        saveSeenHints(seenHints.current);
+      }
+    }
+    if (toast || controller.offline) return;
+    const hint = dueHint(state, seenHints.current);
+    if (!hint) return;
+    seenHints.current.add(hint.id);
+    saveSeenHints(seenHints.current);
+    showToast(hint.text, HINT_MS);
+  });
 
   function toggleSound() {
     const next = !soundOn;
