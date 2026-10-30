@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { RULES_VERSION } from "@site/tycoon-core";
+import { RULES_VERSION, goldenSpawn, type GameState } from "@site/tycoon-core";
 
 // Pipeline Tycoon end to end: the page talks to the real Worker and local D1 (ADR-0006).
 
@@ -483,6 +483,30 @@ test.describe("on a phone", () => {
     ]);
     await touch("touchEnd");
     await expect.poll(count).toBeGreaterThanOrEqual(before + 2);
+    expect(errors).toEqual([]);
+  });
+
+  test("a golden packet is announced when it arrives and the notice goes with it", async ({
+    page,
+  }) => {
+    const errors = watchErrors(page);
+    // Golden packets come one to three minutes in. Shift this tab's copy of the schedule so the
+    // first is already half way across when the page opens (the server keeps its own copy, so
+    // this test only looks and never catches).
+    await page.route("**/api/tycoon/session", async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as { state: GameState };
+      const { golden, playMs } = body.state;
+      const first = goldenSpawn({ seed: golden.seed, start: 0 }, 0);
+      golden.start = playMs - first.at - first.visibleMs / 2;
+      await route.fulfill({ response, json: body });
+    });
+    await play(page);
+    const note = page.getByTestId("golden-note");
+    await expect(note).toHaveText(/^Golden packet in the factory: tap it within \d+ seconds\.$/);
+    await page.screenshot({ path: "test-results/tycoon-golden-phone.png" });
+    // It flies off after its 12 seconds and the notice clears.
+    await expect(note).toHaveText("", { timeout: 10_000 });
     expect(errors).toEqual([]);
   });
 
