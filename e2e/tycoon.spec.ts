@@ -326,14 +326,19 @@ test.describe("on a phone", () => {
     await expect(toast).toHaveText("Tap the core");
     await page.screenshot({ path: "test-results/tycoon-hint-phone.png" });
 
-    // 15 records buy the first intern; the tip waits for the first one to clear.
+    // A tip goes as soon as it has been followed, rather than covering the scene for 5 s.
     await scene.focus();
-    for (let i = 0; i < 20; i++) {
+    await page.keyboard.press("Space");
+    await expect(toast.filter({ hasText: "Tap the core" })).toHaveCount(0, { timeout: 1_500 });
+
+    // 15 records buy the first intern.
+    for (let i = 0; i < 19; i++) {
       await page.keyboard.press("Space");
       await page.waitForTimeout(60);
     }
     await expect(toast).toHaveText("Buy an intern, it works while you don't", { timeout: 8_000 });
     await page.getByRole("button", { name: /Intern/ }).tap();
+    await expect(toast.filter({ hasText: "Buy an intern" })).toHaveCount(0, { timeout: 1_500 });
 
     await page.getByRole("tab", { name: "Stats" }).tap();
     const saved = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/save"));
@@ -344,6 +349,53 @@ test.describe("on a phone", () => {
     await play(page);
     await page.waitForTimeout(1_000);
     await expect(scene.getByRole("status")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
+  test("a lost touch elsewhere on the page doesn't stop the core taking taps", async ({
+    page,
+    context,
+  }) => {
+    const errors = watchErrors(page);
+    const scene = await play(page);
+    const box = (await scene.locator("canvas").boundingBox())!;
+    const core = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    const cdp = await context.newCDPSession(page);
+    const touch = (type: "touchStart" | "touchEnd", points: { x: number; y: number }[] = []) =>
+      cdp.send("Input.dispatchTouchEvent", {
+        type,
+        touchPoints: points.map((point, id) => ({ ...point, id })),
+      });
+
+    // A finger lands on a button that leaves the page before it lifts, as on iOS when the
+    // Migrate button changes under it: the end of that touch never reaches the window. Before
+    // the fix the scene's only touch pointer stayed taken and the core ignored every tap.
+    await page.evaluate(() => {
+      const button = document.createElement("button");
+      button.id = "gone";
+      button.style.cssText = "position:fixed;left:0;bottom:0;width:80px;height:40px";
+      document.body.append(button);
+    });
+    const gone = (await page.locator("#gone").boundingBox())!;
+    await touch("touchStart", [{ x: gone.x + 10, y: gone.y + 10 }]);
+    await page.evaluate(() => document.getElementById("gone")!.remove());
+    await touch("touchEnd");
+
+    const count = async () => Number(await records(page).textContent());
+    for (let i = 0; i < 5; i++) {
+      await page.touchscreen.tap(core.x, core.y);
+      await page.waitForTimeout(80);
+    }
+    await expect.poll(count).toBeGreaterThanOrEqual(5);
+
+    // Two thumbs on the core at once both count.
+    const before = await count();
+    await touch("touchStart", [
+      { x: core.x - 10, y: core.y },
+      { x: core.x + 10, y: core.y },
+    ]);
+    await touch("touchEnd");
+    await expect.poll(count).toBeGreaterThanOrEqual(before + 2);
     expect(errors).toEqual([]);
   });
 
