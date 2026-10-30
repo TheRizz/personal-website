@@ -69,7 +69,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-10-30 (in PR): the game fits one phone screen. The records counter and settings button sit
+- 2026-10-30 (in PR #43): the game fits one phone screen. The records counter and settings button sit
   on the scene's top edge instead of above it, the scene takes 38 % of a box one screen tall
   (`svh`, so Safari's toolbar sliding away doesn't resize it mid-scroll), and after one scroll the
   counter, scene, tabs and at least two shop rows show together. Node labels now sit on the side
@@ -109,7 +109,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-10-30: bug hunt in the project thread ([PR #42](https://github.com/TheRizz/personal-website/pull/42)): taps after a migration, two-thumb tapping, iOS
   zoom, tips; new items 1 (notes) and 2 added.
 - 2026-10-30: game fits one phone screen, with the label overlap and laptop toast fixes (scheduled
-  run, PR pending).
+  run, [PR #43](https://github.com/TheRizz/personal-website/pull/43)).
 
 ## How the scheduled runs work
 
