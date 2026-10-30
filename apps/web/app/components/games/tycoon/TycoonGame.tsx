@@ -97,6 +97,7 @@ export function TycoonGame() {
   const fmt = useFormat();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [goldenNote, setGoldenNote] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
 
   // Start the session once; save on the way out, and catch up on the way back (a phone may have
@@ -130,11 +131,12 @@ export function TycoonGame() {
     let unmount: (() => void) | null = null;
     let cancelled = false;
     void import("./factory-scene.client").then(({ mountFactory }) => {
-      if (!cancelled) unmount = mountFactory(parent, controller, getSettings);
+      if (!cancelled) unmount = mountFactory(parent, controller, getSettings, setGoldenNote);
     });
     return () => {
       cancelled = true;
       unmount?.();
+      setGoldenNote(null);
     };
   }, [playing, controller]);
 
@@ -253,6 +255,10 @@ export function TycoonGame() {
             onPointerDown={() => soundOn && unlockAudio()}
             className="absolute inset-0 touch-manipulation bg-[#07090c] outline-none select-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 focus-visible:ring-inset"
           >
+            {/* The scene draws the golden packet; this says so for screen readers. */}
+            <p className="sr-only" aria-live="polite" data-testid="golden-note">
+              {goldenNote}
+            </p>
             {/* Top edge, under the counter: a toast at the bottom sat below the fold on laptops. */}
             {toast && (
               <p
