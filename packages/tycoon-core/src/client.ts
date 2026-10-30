@@ -201,6 +201,11 @@ const FLUSH_AT_ACTIONS = 1_500;
 const CLICK_MERGE_MS = 1_000;
 /** "While you were away" shows only after at least this long. */
 const OFFLINE_NOTICE_MS = 60_000;
+/**
+ * When the page comes back and the wall clock moved on this much more than `now()`, the device
+ * slept with the tab open (iOS stops the monotonic clock then), so the tab catches up.
+ */
+const SLEPT_MS = 60_000;
 /** After a failed save, try again this much later. */
 const RETRY_MS = 30_000;
 
@@ -253,6 +258,8 @@ export class TycoonController {
   /** A resync is fetching a fresh session; saves wait for it. */
   private resyncing = false;
   private lastTick = 0;
+  /** Both clocks at the last frame, to tell when the device slept in between (see tick()). */
+  private clockMark = { now: 0, wall: 0 };
   private clickTokens = MAX_CLICKS_PER_SECOND;
   /** How many clicks the newest click entry may hold (see click()). */
   private clickEntryBudget = 0;
@@ -318,6 +325,7 @@ export class TycoonController {
     this.local = started.state;
     this.pending = { start: now, actions: [] };
     this.lastTick = now;
+    this.clockMark = { now, wall: this.wallClock() };
     this.clickTokens = MAX_CLICKS_PER_SECOND;
     this.nextSaveAt = now + AUTOSAVE_MS;
     // A reload a few seconds later isn't "away"; only say so after a minute.
@@ -371,7 +379,12 @@ export class TycoonController {
     const now = this.now();
     const ms = now - this.lastTick;
     if (ms <= 0) return;
+    const wall = this.wallClock();
+    // The wall clock ran on while ours stood still: the device slept with the tab open (iOS stops
+    // performance.now then; desktops keep both running, so this stays near zero there).
+    const slept = wall - this.clockMark.wall - (now - this.clockMark.now) >= SLEPT_MS;
     this.lastTick = now;
+    this.clockMark = { now, wall };
     const before = this.local.achievements.length;
     advance(this.local, ms);
     this.clickTokens = Math.min(
@@ -379,7 +392,8 @@ export class TycoonController {
       this.clickTokens + (ms * MAX_CLICKS_PER_SECOND) / 1000,
     );
     this.announceAchievements(before);
-    if (now >= this.nextSaveAt) void this.save();
+    if (slept) this.catchUp();
+    else if (now >= this.nextSaveAt) void this.save();
   }
 
   private announceAchievements(before: number) {
@@ -592,6 +606,30 @@ export class TycoonController {
     if (!this.playing) return;
     if (this.inflight) this.retryOnFailure = true;
     else if (this.unconfirmed !== null) void this.save();
+    // Notices a sleep before the next frame does (catchUp() runs once either way).
+    this.tick();
+  }
+
+  /**
+   * Credits the time the device slept as offline time, the way a reopened tab would: a fresh
+   * session, where the server counts the gap since the save sent on the way out on its own clock
+   * (capped like any offline time) and the tab shows "While you were away". Only once that save
+   * is in and nothing has been played since, so starting over loses nothing; otherwise the slept
+   * time stays uncredited, as before.
+   */
+  private catchUp() {
+    if (this.inflight) {
+      void this.inflight.then(() => this.catchUp());
+      return;
+    }
+    if (
+      this.playing &&
+      !this.resyncing &&
+      this.unconfirmed === null &&
+      this.pending.actions.length === 0
+    ) {
+      void this.resync();
+    }
   }
 
   private stop(error: unknown) {
