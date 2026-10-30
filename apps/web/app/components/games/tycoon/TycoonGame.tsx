@@ -32,7 +32,15 @@ import {
 import { primaryButton, secondaryButton } from "~/components/games/ui";
 import { tycoonClient } from "~/lib/games/tycoon/api";
 import { TIER_HEX } from "./colours";
-import { HINTS, dueHint, isReturning, loadSeenHints, saveSeenHints, type HintId } from "./hints";
+import {
+  HINTS,
+  dueHint,
+  isReturning,
+  loadSeenHints,
+  saveSeenHints,
+  type Hint,
+  type HintId,
+} from "./hints";
 import { LinkDevice } from "./LinkDevice";
 import { SettingsSheet } from "./SettingsSheet";
 import { getSettings, updateSettings, useFormat, useSettings } from "./settings";
@@ -134,6 +142,10 @@ export function TycoonGame() {
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), ms);
   }, []);
+  const hideToast = useCallback(() => {
+    window.clearTimeout(toastTimer.current);
+    setToast(null);
+  }, []);
   useEffect(() => () => window.clearTimeout(toastTimer.current), []);
 
   // Sounds, toasts and the ending.
@@ -153,10 +165,18 @@ export function TycoonGame() {
   const state = controller.local;
 
   // First-time tips, one at a time when nothing else is on show. A game that already has
-  // progress when the page opens counts every tip as seen.
+  // progress when the page opens counts every tip as seen. A tip goes as soon as it has been
+  // followed ("Tap the core" on the first tap), rather than covering the scene for its full time.
   const seenHints = useRef<Set<HintId> | null>(null);
+  const shownHint = useRef<Hint | null>(null);
   useEffect(() => {
     if (!state || !playing) return;
+    if (shownHint.current && toast !== shownHint.current.text) shownHint.current = null;
+    if (shownHint.current && !shownHint.current.due(state)) {
+      shownHint.current = null;
+      hideToast();
+      return;
+    }
     if (!seenHints.current) {
       seenHints.current = loadSeenHints();
       if (isReturning(state) && seenHints.current.size < HINTS.length) {
@@ -169,6 +189,7 @@ export function TycoonGame() {
     if (!hint) return;
     seenHints.current.add(hint.id);
     saveSeenHints(seenHints.current);
+    shownHint.current = hint;
     showToast(hint.text, HINT_MS);
   });
 
@@ -193,9 +214,10 @@ export function TycoonGame() {
     }
   }
 
+  // touch-manipulation: quick taps on the shop buy things instead of zooming the page (iOS).
   return (
     <div
-      className="relative mx-[calc((100%-min(68.75rem,100cqw-1rem))/2)] w-[min(68.75rem,100cqw-1rem)]"
+      className="relative mx-[calc((100%-min(68.75rem,100cqw-1rem))/2)] w-[min(68.75rem,100cqw-1rem)] touch-manipulation"
       data-testid="tycoon"
     >
       {newVersion && (
@@ -286,8 +308,13 @@ export function TycoonGame() {
       </div>
 
       <p className="mt-3 text-[0.8rem] text-muted">
-        Click the core (or focus it and press space) to process records. Keys 1–0 build. Progress is
-        saved to the server every few minutes and when you leave.
+        <span className="pointer-coarse:hidden">
+          Click the core (or focus it and press space) to process records. Keys 1–0 build.
+        </span>
+        <span className="hidden pointer-coarse:inline">
+          Tap the core to process records; two thumbs work too.
+        </span>{" "}
+        Progress is saved to the server every few minutes and when you leave.
       </p>
 
       {controller.offline && state && (

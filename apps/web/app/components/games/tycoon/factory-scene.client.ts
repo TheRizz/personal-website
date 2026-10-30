@@ -24,6 +24,8 @@ const OVERCLOCK = 0xf472b6;
 const GOLD = 0xfbbf24;
 const BG = 0x07090c;
 const GRID = 0x0f1720;
+/** Fingers the core answers at once (two thumbs, with room for a stray one). */
+const TOUCH_POINTERS = 4;
 
 interface Packet {
   tier: number;
@@ -343,10 +345,28 @@ export function mountFactory(
     banner: false,
     audio: { noAudio: true },
     scale: { mode: Phaser.Scale.RESIZE, width: parent.clientWidth, height: parent.clientHeight },
-    input: { keyboard: false },
+    // Only touches that start on the canvas, and one pointer per finger. With window events on,
+    // a touch anywhere on the page (the Migrate button, the shop) took the scene's only touch
+    // pointer, and if its end never arrived (iOS loses it when the touched element changes
+    // under the finger) the core ignored every tap until a reload.
+    input: { keyboard: false, windowEvents: false, activePointers: TOUCH_POINTERS },
     render: { antialias: true },
     scene: [],
   });
   game.scene.add("factory", FactoryScene, true, { controller, settings });
-  return () => game.destroy(true);
+  // Belt and braces: a new touch frees any pointer still held by a finger that has gone.
+  const releaseLost = (event: TouchEvent) => {
+    const live = new Set(Array.from(event.touches, (touch) => touch.identifier));
+    for (const pointer of game.input?.pointers.slice(1) ?? []) {
+      if (pointer.active && !live.has(pointer.identifier)) {
+        pointer.active = false;
+        pointer.isDown = false;
+      }
+    }
+  };
+  parent.addEventListener("touchstart", releaseLost, { capture: true, passive: true });
+  return () => {
+    parent.removeEventListener("touchstart", releaseLost, { capture: true });
+    game.destroy(true);
+  };
 }
