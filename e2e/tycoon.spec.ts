@@ -383,7 +383,10 @@ test.describe("on a phone", () => {
     const errors = watchErrors(page);
     const scene = await play(page);
     const game = scene.locator("xpath=../..");
-    await game.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top - 8));
+    // Instant: the site scrolls smoothly, and a slow CI runner would measure mid-scroll.
+    await game.evaluate((el) =>
+      window.scrollBy({ top: el.getBoundingClientRect().top - 8, behavior: "instant" }),
+    );
     const inView = async (name: string, box: { y: number; height: number } | null) => {
       expect(box, name).not.toBeNull();
       expect(box!.y, `${name} top`).toBeGreaterThanOrEqual(0);
