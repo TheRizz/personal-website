@@ -316,8 +316,45 @@ test("settings change how numbers are written and are remembered", async ({ page
   expect(errors).toEqual([]);
 });
 
+test("on a laptop a tip shows near the top of the scene, above the fold", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  const scene = await play(page);
+  const toast = scene.getByRole("status");
+  await expect(toast).toHaveText("Tap the core");
+  const box = (await toast.boundingBox())!;
+  const sceneBox = (await scene.boundingBox())!;
+  expect(box.y + box.height).toBeLessThan(900);
+  expect(box.y - sceneBox.y).toBeLessThan(100);
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
+
+  test("after one scroll the counter, scene and two shop rows fit on the screen", async ({
+    page,
+  }) => {
+    const errors = watchErrors(page);
+    const scene = await play(page);
+    const game = scene.locator("xpath=../..");
+    await game.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top - 8));
+    const inView = async (name: string, box: { y: number; height: number } | null) => {
+      expect(box, name).not.toBeNull();
+      expect(box!.y, `${name} top`).toBeGreaterThanOrEqual(0);
+      expect(box!.y + box!.height, `${name} bottom`).toBeLessThanOrEqual(844);
+    };
+    // The counter sits on the scene's top edge.
+    const counter = (await records(page).boundingBox())!;
+    const sceneBox = (await scene.boundingBox())!;
+    expect(counter.y).toBeGreaterThanOrEqual(sceneBox.y);
+    expect(counter.y + counter.height).toBeLessThan(sceneBox.y + 64);
+    await inView("scene", sceneBox);
+    await inView("shop tabs", await page.getByRole("tablist", { name: "Shop" }).boundingBox());
+    const rows = page.getByRole("tabpanel").getByRole("listitem");
+    await inView("first shop row", await rows.nth(0).boundingBox());
+    await inView("second shop row", await rows.nth(1).boundingBox());
+    await page.screenshot({ path: "test-results/tycoon-one-screen-phone.png" });
+    expect(errors).toEqual([]);
+  });
 
   test("a new game shows each first-time tip once and a reload shows none", async ({ page }) => {
     const errors = watchErrors(page, [/Failed to fetch manifest patches/]);

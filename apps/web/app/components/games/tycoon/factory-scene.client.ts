@@ -12,6 +12,7 @@ import {
 } from "@site/tycoon-core";
 
 import { TIER_COLOURS } from "./colours";
+import { factoryLayout, labelPlacement, nodeRadius } from "./factory-layout";
 import type { TycoonSettings } from "./settings";
 
 // The live "factory": a dark neon schematic drawn in code (no image assets, so the CSP needs no
@@ -50,7 +51,6 @@ class FactoryScene extends Phaser.Scene {
   private graphics!: Phaser.GameObjects.Graphics;
   private labels: Phaser.GameObjects.Text[] = [];
   private coreLabel!: Phaser.GameObjects.Text;
-  private bannerLabel!: Phaser.GameObjects.Text;
   private packets: Packet[] = [];
   private bursts: Burst[] = [];
   private spawnDebt = GENERATORS.map(() => 0);
@@ -88,9 +88,6 @@ class FactoryScene extends Phaser.Scene {
     this.coreLabel = this.add
       .text(0, 0, "", { ...mono, fontSize: "12px", color: "#a5f3fc", align: "center" })
       .setOrigin(0.5, 0);
-    this.bannerLabel = this.add
-      .text(0, 0, "", { ...mono, fontSize: "12px", color: "#fbcfe8" })
-      .setOrigin(0.5, 0);
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => this.handlePointer(pointer));
     this.unsubscribe = this.controller.onEvent((event) => this.handleEvent(event));
@@ -99,33 +96,22 @@ class FactoryScene extends Phaser.Scene {
 
   /** Where everything sits for the current size. */
   private layout() {
-    const { width, height } = this.scale;
-    const cx = width / 2;
-    const cy = height / 2;
-    const rx = Math.max(60, width / 2 - 48);
-    const ry = Math.max(50, height / 2 - 40);
-    const coreRadius = Math.max(40, Math.min(width, height) * 0.12);
-    const nodes = GENERATORS.map((_, tier) => {
-      // Spread the ten tiers around the core, starting at the top-left and going clockwise.
-      const angle = -Math.PI * 0.85 + (tier / GENERATORS.length) * Math.PI * 2;
-      return { x: cx + Math.cos(angle) * rx, y: cy + Math.sin(angle) * ry };
-    });
-    return { width, height, cx, cy, coreRadius, nodes };
+    return factoryLayout(this.scale.width, this.scale.height);
   }
 
-  private goldenPosition(state: GameState, width: number, height: number) {
+  private goldenPosition(state: GameState, width: number, top: number, area: number) {
     const spawn = upcomingGolden(state.golden, state.playMs);
     const progress = (state.playMs - spawn.at) / spawn.visibleMs;
     if (progress < 0 || progress > 1) return null;
-    const y = height * (0.18 + spawn.lane * 0.64) + Math.sin(progress * Math.PI * 4) * 10;
+    const y = top + area * (0.18 + spawn.lane * 0.64) + Math.sin(progress * Math.PI * 4) * 10;
     return { index: spawn.index, x: -20 + progress * (width + 40), y, progress };
   }
 
   private handlePointer(pointer: Phaser.Input.Pointer) {
     const state = this.controller.local;
     if (!state) return;
-    const { width, height, cx, cy, coreRadius } = this.layout();
-    const golden = this.goldenPosition(state, width, height);
+    const { width, top, area, cx, cy, coreRadius } = this.layout();
+    const golden = this.goldenPosition(state, width, top, area);
     if (golden && Phaser.Math.Distance.Between(pointer.x, pointer.y, golden.x, golden.y) < 32) {
       this.controller.catchGolden(golden.index);
       return;
@@ -201,7 +187,8 @@ class FactoryScene extends Phaser.Scene {
     const state = this.controller.local;
     const g = this.graphics;
     g.clear();
-    const { width, height, cx, cy, coreRadius, nodes } = this.layout();
+    const layout = this.layout();
+    const { width, height, top, area, cx, cy, coreRadius, nodes } = layout;
     const dt = Math.min(delta, 100) / 1000;
     const still = this.settings().reduceMotion;
 
@@ -230,15 +217,17 @@ class FactoryScene extends Phaser.Scene {
       g.lineBetween(node.x, node.y, cx, cy);
       g.lineStyle(1.5, colour, 0.45);
       g.lineBetween(node.x, node.y, cx, cy);
-      const radius = 9 + Math.min(12, Math.log2(owned + 1) * 1.6);
+      const radius = nodeRadius(layout, owned);
       g.fillStyle(colour, 0.12);
-      g.fillCircle(node.x, node.y, radius + 7);
+      g.fillCircle(node.x, node.y, radius * 1.33);
       g.fillStyle(BG, 1);
       g.fillCircle(node.x, node.y, radius);
       g.lineStyle(2, colour, 0.95);
       g.strokeCircle(node.x, node.y, radius);
+      const place = labelPlacement(layout, tier, radius);
       label.setText(`${LABELS[tier]}\n×${owned}`);
-      label.setPosition(node.x, node.y + radius + 4);
+      label.setOrigin(place.origin.x, place.origin.y);
+      label.setPosition(place.x, place.y);
       label.setAlpha(Math.min(1, label.alpha + dt * 2));
 
       // Packets per second grow with the log of production, so the screen stays readable.
@@ -293,8 +282,6 @@ class FactoryScene extends Phaser.Scene {
     this.coreLabel.setPosition(cx, cy - (coreRadius < 52 ? 12 : 14));
     const coreText = boosted ? "#fbcfe8" : "#a5f3fc";
     if (this.coreLabel.style.color !== coreText) this.coreLabel.setColor(coreText);
-    this.bannerLabel.setText(boosted ? "OVERCLOCK ×7" : "");
-    this.bannerLabel.setPosition(cx, 10);
 
     // Purchase and catch bursts.
     this.bursts = this.bursts.filter((burst) => {
@@ -306,7 +293,7 @@ class FactoryScene extends Phaser.Scene {
     });
 
     // The golden packet, while it's on screen.
-    const golden = this.goldenPosition(state, width, height);
+    const golden = this.goldenPosition(state, width, top, area);
     if (golden) {
       const size = still ? 12 : 11 + Math.sin(this.time.now / 120) * 2;
       g.fillStyle(GOLD, 0.18);
