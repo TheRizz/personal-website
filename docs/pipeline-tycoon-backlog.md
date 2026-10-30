@@ -65,7 +65,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-10-30 (in PR): first-time hints. A new game shows three tips once each in the scene's
+- 2026-10-30 (in PR #41): first-time hints. A new game shows three tips once each in the scene's
   toast ("Tap the core", "Buy an intern, it works while you don't", "Upgrades tab has something
   for you"), each when its moment comes; remembered in this browser, none on a game that already
   has progress.
@@ -86,7 +86,7 @@ One line per run: date (UTC), what happened, PR link.
 
 - 2026-10-29: backlog created; first batch built in the project thread (PR #39).
 - 2026-10-29: settings panel (scheduled run, [PR #40](https://github.com/TheRizz/personal-website/pull/40)).
-- 2026-10-30: first-time hints (scheduled run).
+- 2026-10-30: first-time hints (scheduled run, [PR #41](https://github.com/TheRizz/personal-website/pull/41)).
 
 ## How the scheduled runs work
 
