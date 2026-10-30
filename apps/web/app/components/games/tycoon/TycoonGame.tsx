@@ -18,6 +18,7 @@ import {
   generatorCost,
   maxAffordable,
   migrationGain,
+  overclocked,
   nextMilestone,
   nextPointAt,
   achievementProgress,
@@ -46,7 +47,8 @@ import { SettingsSheet } from "./SettingsSheet";
 import { getSettings, updateSettings, useFormat, useSettings } from "./settings";
 import { playEvent, unlockAudio } from "./sound";
 
-// The page: stats bar, the Phaser factory scene and the HTML shop (docs/04-pipeline-tycoon.md §1).
+// The page: the Phaser factory scene with the counter on its top edge, and the HTML shop
+// (docs/04-pipeline-tycoon.md §1).
 // Phones stack scene over a tabbed shop; wider screens put them side by side.
 
 type Tab = "generators" | "upgrades" | "migrate" | "stats";
@@ -236,33 +238,38 @@ export function TycoonGame() {
         </div>
       )}
 
-      <StatsBar
-        state={state}
-        soundOn={soundOn}
-        onToggleSound={toggleSound}
-        onOpenSettings={() => setSettingsOpen(true)}
-        saving={controller.saving}
-      />
       <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
-      <div className="flex h-[calc(100dvh-9rem)] min-h-[34rem] flex-col overflow-hidden rounded-xl border border-line lg:grid lg:h-[40rem] lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-1">
-        <div
-          ref={sceneRef}
-          role="button"
-          tabIndex={0}
-          aria-label="Factory. Press space to process records, number keys to build."
-          onKeyDown={onSceneKey}
-          onPointerDown={() => soundOn && unlockAudio()}
-          className="relative min-h-0 flex-[0_0_44%] touch-manipulation bg-[#07090c] outline-none select-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 lg:h-full"
-        >
-          {toast && (
-            <p
-              role="status"
-              className="pointer-events-none absolute inset-x-3 bottom-3 z-10 rounded-lg border border-cyan-300/30 bg-black/80 px-3 py-2 font-mono text-xs text-cyan-100"
-            >
-              {toast}
-            </p>
-          )}
+      {/* On phones the box is one screen tall (svh, so Safari's toolbar sliding away doesn't
+          resize the scene mid-scroll): after one scroll the counter, scene and shop show at once. */}
+      <div className="flex h-[calc(100svh-1rem)] min-h-[32rem] flex-col overflow-hidden rounded-xl border border-line lg:grid lg:h-[40rem] lg:grid-cols-[minmax(0,1fr)_24rem] lg:grid-rows-1">
+        <div className="relative min-h-0 flex-[0_0_38%] lg:h-full">
+          <div
+            ref={sceneRef}
+            role="button"
+            tabIndex={0}
+            aria-label="Factory. Press space to process records, number keys to build."
+            onKeyDown={onSceneKey}
+            onPointerDown={() => soundOn && unlockAudio()}
+            className="absolute inset-0 touch-manipulation bg-[#07090c] outline-none select-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 focus-visible:ring-inset"
+          >
+            {/* Top edge, under the counter: a toast at the bottom sat below the fold on laptops. */}
+            {toast && (
+              <p
+                role="status"
+                className="pointer-events-none absolute inset-x-3 top-16 z-10 rounded-lg border border-cyan-300/30 bg-black/80 px-3 py-2 font-mono text-xs text-cyan-100"
+              >
+                {toast}
+              </p>
+            )}
+          </div>
+          <SceneCounter
+            state={state}
+            soundOn={soundOn}
+            onToggleSound={toggleSound}
+            onOpenSettings={() => setSettingsOpen(true)}
+            saving={controller.saving}
+          />
         </div>
 
         <div className="flex min-h-0 flex-1 flex-col border-t border-line lg:border-t-0 lg:border-l">
@@ -343,7 +350,8 @@ export function TycoonGame() {
   );
 }
 
-function StatsBar({
+/** The counter, laid over the scene's top edge (the scene leaves that strip clear). */
+function SceneCounter({
   state,
   soundOn,
   onToggleSound,
@@ -358,28 +366,29 @@ function StatsBar({
 }) {
   const fmt = useFormat();
   return (
-    <div className="mb-3 flex items-end justify-between gap-4">
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 px-3 pt-2.5 pb-2 text-slate-100">
       <div className="min-w-0">
         <p
-          className="truncate text-4xl leading-none font-bold tracking-[-0.02em] tabular-nums"
+          className="truncate text-[1.75rem] leading-none font-bold lg:text-4xl tracking-[-0.02em] tabular-nums"
           aria-live="off"
           data-testid="records"
         >
           {state ? fmt(state.records) : "—"}
         </p>
-        <p className="mt-1 text-sm text-muted tabular-nums">
+        <p className="mt-1 truncate text-xs text-slate-400 tabular-nums">
           records{state ? ` · ${fmt(currentRate(state))} a second` : ""}
-          {state && state.ap > 0 && <span className="ml-3 text-accent-violet">{state.ap} AP</span>}
-          {saving && <span className="ml-3 text-accent/80">saving…</span>}
+          {state && overclocked(state) && <span className="ml-2 text-pink-300">overclock ×7</span>}
+          {state && state.ap > 0 && <span className="ml-2 text-violet-300">{state.ap} AP</span>}
+          {saving && <span className="ml-2 text-cyan-200/80">saving…</span>}
         </p>
       </div>
-      <div className="flex shrink-0 gap-2">
+      <div className="pointer-events-auto flex shrink-0 gap-1.5">
         {/* On phones sound lives in the settings sheet, to keep the bar to one button. */}
         <button
           onClick={onToggleSound}
           aria-pressed={soundOn}
           aria-label={soundOn ? "Mute sound" : "Turn sound on"}
-          className={`${secondaryButton} max-sm:hidden`}
+          className={`${sceneButton} max-sm:hidden`}
         >
           {soundOn ? <Volume2 /> : <VolumeX />}
         </button>
@@ -387,7 +396,7 @@ function StatsBar({
           onClick={onOpenSettings}
           aria-label="Settings"
           aria-haspopup="dialog"
-          className={secondaryButton}
+          className={sceneButton}
         >
           <Settings />
         </button>
@@ -395,6 +404,10 @@ function StatsBar({
     </div>
   );
 }
+
+/** Quiet icon button on the dark scene, whatever the site's theme. */
+const sceneButton =
+  "inline-flex size-10 items-center justify-center rounded-lg border border-white/15 bg-white/5 text-slate-200 transition duration-200 ease-spring hover:bg-white/10 active:scale-95 [&_svg]:size-[18px]";
 
 function UpgradeBadge({ state }: { state: GameState }) {
   const affordable = availableUpgrades(state).filter((u) => u.cost <= state.records).length;
