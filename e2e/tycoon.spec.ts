@@ -319,6 +319,34 @@ test("settings change how numbers are written and are remembered", async ({ page
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
+  test("a new game shows each first-time tip once and a reload shows none", async ({ page }) => {
+    const errors = watchErrors(page, [/Failed to fetch manifest patches/]);
+    const scene = await play(page);
+    const toast = scene.getByRole("status");
+    await expect(toast).toHaveText("Tap the core");
+    await page.screenshot({ path: "test-results/tycoon-hint-phone.png" });
+
+    // 15 records buy the first intern; the tip waits for the first one to clear.
+    await scene.focus();
+    for (let i = 0; i < 20; i++) {
+      await page.keyboard.press("Space");
+      await page.waitForTimeout(60);
+    }
+    await expect(toast).toHaveText("Buy an intern, it works while you don't", { timeout: 8_000 });
+    await page.getByRole("button", { name: /Intern/ }).tap();
+
+    await page.getByRole("tab", { name: "Stats" }).tap();
+    const saved = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/save"));
+    await page.getByRole("button", { name: "Save now" }).tap();
+    await saved;
+    await page.waitForLoadState("networkidle");
+    await page.reload();
+    await play(page);
+    await page.waitForTimeout(1_000);
+    await expect(scene.getByRole("status")).toHaveCount(0);
+    expect(errors).toEqual([]);
+  });
+
   test("sound moves into the settings sheet", async ({ page }) => {
     const errors = watchErrors(page);
     await play(page);
