@@ -77,7 +77,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-10-30 (bug hunt in the project thread, PR below): tapping the core stopped working after
+- 2026-10-30 (bug hunt in the project thread, [PR #42](https://github.com/TheRizz/personal-website/pull/42)): tapping the core stopped working after
   a migration on iPhone until a reload. The scene had one touch pointer and also took touches
   from anywhere on the page, so a tap on a shop or Migrate button whose end iOS never delivered
   kept that pointer busy for good. The scene now only listens to touches on itself, answers up
@@ -107,7 +107,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-10-29: backlog created; first batch built in the project thread (PR #39).
 - 2026-10-29: settings panel (scheduled run, [PR #40](https://github.com/TheRizz/personal-website/pull/40)).
 - 2026-10-30: first-time hints (scheduled run, [PR #41](https://github.com/TheRizz/personal-website/pull/41)).
-- 2026-10-30: bug hunt in the project thread: taps after a migration, two-thumb tapping, iOS
+- 2026-10-30: bug hunt in the project thread ([PR #42](https://github.com/TheRizz/personal-website/pull/42)): taps after a migration, two-thumb tapping, iOS
   zoom, tips; new items 1 (notes) and 2 added.
 
 ## How the scheduled runs work
