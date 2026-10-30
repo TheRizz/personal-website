@@ -61,7 +61,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-10-30 (in PR): offline time in a tab left open. A phone that sleeps with the game open
+- 2026-10-30 ([PR #44](https://github.com/TheRizz/personal-website/pull/44)): offline time in a tab left open. A phone that sleeps with the game open
   stops the page's own clock, so that time used to earn nothing. The game now compares it with
   the wall clock each frame; when a minute or more went missing and the save sent on the way out
   is in with nothing played since, it starts a fresh session, so the server credits the gap on
@@ -108,7 +108,7 @@ One line per run: date (UTC), what happened, PR link.
   zoom, tips; new items 1 (notes) and 2 added.
 - 2026-10-30: game fits one phone screen, with the label overlap and laptop toast fixes (scheduled
   run, [PR #43](https://github.com/TheRizz/personal-website/pull/43)).
-- 2026-10-30: offline time in a tab left open (scheduled run, PR link to follow).
+- 2026-10-30: offline time in a tab left open (scheduled run, [PR #44](https://github.com/TheRizz/personal-website/pull/44)).
 
 ## How the scheduled runs work
 
