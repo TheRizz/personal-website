@@ -7,11 +7,14 @@ import {
   type SessionStart,
   type Transport,
 } from "./client";
-import { replay, type SaveLog } from "./replay";
+import { applyOffline, replay, type SaveLog } from "./replay";
 import { cloneState, newGame, type GameState } from "./rules";
 import { AUTOSAVE_MS } from "./schema";
 
-/** A server in memory: replays each log like the Worker does, with a clock the test moves. */
+/**
+ * A server in memory: replays each log like the Worker does, with a clock the test moves, and
+ * credits offline time since the last save when a session starts.
+ */
 function fakeServer(start: GameState = newGame(), clock: () => number = () => 0) {
   let state = cloneState(start);
   let seq = 0;
@@ -25,11 +28,14 @@ function fakeServer(start: GameState = newGame(), clock: () => number = () => 0)
   const transport: Transport = {
     async startSession(): Promise<SessionStart> {
       sessions += 1;
+      const offline = applyOffline(state, clock() - savedAt);
+      state = offline.state;
+      savedAt = clock();
       return {
         state: cloneState(state),
         session: `s${sessions}`,
         seq,
-        offline: { ms: 0, earned: 0 },
+        offline: { ms: offline.creditedMs, earned: offline.earned },
       };
     },
     async uploadSave(_session, clientSeq, log): Promise<SaveAck> {
@@ -93,22 +99,36 @@ function fakeServer(start: GameState = newGame(), clock: () => number = () => 0)
   };
 }
 
+/** `now` is the page's monotonic clock, `wall` the real time (the server's clock too). */
 function setup(start?: GameState) {
   let now = 0;
-  const server = fakeServer(start, () => now);
+  let wall = 1_000_000;
+  const server = fakeServer(start, () => wall);
   const controller = new TycoonController(
     server.transport,
     () => now,
-    () => 0,
+    () => wall,
   );
   return {
     server,
     controller,
     advance(ms: number) {
       now += ms;
+      wall += ms;
       controller.tick();
     },
+    /** The phone sleeps with the tab open: real time passes, the page's clock stands still. */
+    sleep(ms: number) {
+      wall += ms;
+    },
   };
+}
+
+/** A game that earns something every second. */
+function producing(): GameState {
+  const state = newGame();
+  state.owned[0] = 10;
+  return state;
 }
 
 describe("TycoonController", () => {
@@ -259,6 +279,75 @@ describe("TycoonController", () => {
     advance(16);
     await vi.waitFor(() => expect(server.logs).toHaveLength(1));
     expect(server.state.clicks).toBe(1);
+  });
+
+  it("credits the time a phone slept with the tab open as time away", async () => {
+    const { server, controller, advance, sleep } = setup(producing());
+    await controller.start();
+    advance(1_000);
+    controller.click();
+    // Hidden: the save on the way out lands. Then the phone sleeps for an hour.
+    await controller.save(true);
+    sleep(3_600_000);
+    const before = controller.local!.lifetimeRecords;
+    advance(16);
+    controller.resume();
+    await vi.waitFor(() => expect(server.sessions).toBe(2));
+    await vi.waitFor(() => expect(controller.offline?.ms).toBe(3_600_016));
+    expect(controller.status.kind).toBe("playing");
+    expect(controller.local!.clicks).toBe(1);
+    expect(controller.local!.lifetimeRecords).toBeGreaterThan(
+      before + controller.offline!.earned / 2,
+    );
+    // Play carries on in the new session.
+    advance(500);
+    controller.click();
+    await controller.save();
+    expect(server.state.clicks).toBe(2);
+  });
+
+  it("catches up after the save on the way out answers, if it is still in flight", async () => {
+    const { server, controller, advance, sleep } = setup(producing());
+    await controller.start();
+    advance(1_000);
+    const release = server.holdSaves();
+    const hidden = controller.save(true);
+    sleep(3_600_000);
+    advance(16);
+    controller.resume();
+    expect(server.sessions).toBe(1);
+    release();
+    await hidden;
+    // (This fake server only takes the held save in now, so it has no away time to credit.)
+    await vi.waitFor(() => expect(server.sessions).toBe(2));
+    await vi.waitFor(() => expect(controller.saving).toBe(false));
+    expect(controller.status.kind).toBe("playing");
+    expect(server.logs).toHaveLength(1);
+  });
+
+  it("does not start over when that would drop unsaved play", async () => {
+    const { server, controller, advance, sleep } = setup(producing());
+    await controller.start();
+    advance(1_000);
+    controller.click();
+    sleep(3_600_000);
+    advance(16);
+    controller.resume();
+    await controller.save();
+    expect(server.sessions).toBe(1);
+    expect(server.state.clicks).toBe(1);
+    expect(controller.offline).toBeNull();
+  });
+
+  it("leaves a tab alone when both clocks ran (a desktop's hidden tab)", async () => {
+    const { server, controller, advance } = setup(producing());
+    await controller.start();
+    await controller.save(true);
+    advance(3_600_000);
+    controller.resume();
+    await controller.save();
+    expect(server.sessions).toBe(1);
+    expect(controller.offline).toBeNull();
   });
 
   it("stops when another device takes over", async () => {

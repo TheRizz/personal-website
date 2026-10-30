@@ -10,48 +10,40 @@ old tabs are told to reload, and the CLI needs a new release (docs/04-pipeline-t
 
 ## Up next
 
-1. **Offline time in a tab left open** (M, save robustness, read ADR-0006 first). Offline
-   earnings are only credited when a session starts. A tab left open keeps its session, and the
-   client measures play time with `performance.now()`, which on iOS likely stops while the phone
-   sleeps; if so, locking the phone for an hour with the game open earns nothing for that hour,
-   while closing the tab and reopening would have shown "While you were away". Confirm first
-   (log `Date.now()` against `performance.now()` across a lock on Ryan's iPhone, or ask him),
-   then on `resume()` after a long hidden gap with no unconfirmed save, start a fresh session so
-   the server credits the gap. E2E test with a faked clock.
-2. **Golden packet you can't miss** (S, UI, no rules bump). Pulse the packet's trail, add a soft
+1. **Golden packet you can't miss** (S, UI, no rules bump). Pulse the packet's trail, add a soft
    chime when sound is on, and show its remaining time as a ring; respect reduced motion.
-3. **Keyboard help** (S, UI, no rules bump). `?` opens a small list of keys (space, 1–0, x for
+2. **Keyboard help** (S, UI, no rules bump). `?` opens a small list of keys (space, 1–0, x for
    amount, tab switching, g to catch a golden packet like the CLI); mention it in the hint line.
-4. **Install on the home screen** (M, no rules bump). A web app manifest scoped to
+3. **Install on the home screen** (M, no rules bump). A web app manifest scoped to
    `/games/pipeline-tycoon` with an icon drawn from the core node, `display: standalone`, and
    theme colour from the scene, so iPhone "Add to Home Screen" opens the game full screen.
-5. **Unsaved-play safety net** (M, save robustness). Keep the pending action log in localStorage
+4. **Unsaved-play safety net** (M, save robustness). Keep the pending action log in localStorage
    between saves so a killed tab (iOS memory pressure) does not lose up to 5 minutes; on the next
    load, send it as the first save of the new session if the server's seq still matches, otherwise
    drop it. Needs a careful server-side check and e2e test; read ADR-0006 first.
-6. **Performance pass** (M). Cap live packets and particles at high tiers, measure frame time at
+5. **Performance pass** (M). Cap live packets and particles at high tiers, measure frame time at
    iPhone width with CPU throttling in Playwright, record before/after numbers in the PR. (Phaser
    already pauses itself when the tab is hidden.)
-7. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
+6. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
    own 100 interns and nothing else, migrate with exactly 1 AP, 10 minutes without clicking, buy
    an upgrade within a second of affording it, own one of every tier, reach the ending without
    clicking after the first migration. Batch with another rules-bump item when possible.
-8. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
+7. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
    cap to 12 h then 24 h. Needs a "spend AP" control in the Migrate tab (AP stay a production
    bonus otherwise).
-9. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
+8. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
     time between purchases, look for walls of more than ~3 minutes with nothing to buy; retune only
     inside the pacing test's targets.
-10. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
+9. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
     `[A-Za-z0-9_]`, profanity filter), top 50 by lifetime Records, cached a few minutes. New
     expand-only migration in `apps/web/migrations-tycoon/` (deploy applies it).
-11. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
+10. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
     board; CLI panel.
-12. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
-13. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
+11. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
+12. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
     using the Web Share API on phones (copy to clipboard elsewhere): "I migrated my data platform
     3 times and processed 4.2 trillion records in Pipeline Tycoon" with the page link.
-14. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
+13. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
     the two stay alike; patch release, Ryan pushes the tag.
 
 ## Needs Ryan first
@@ -69,7 +61,13 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-10-30 (in PR #43): the game fits one phone screen. The records counter and settings button sit
+- 2026-10-30 ([PR #44](https://github.com/TheRizz/personal-website/pull/44)): offline time in a tab left open. A phone that sleeps with the game open
+  stops the page's own clock, so that time used to earn nothing. The game now compares it with
+  the wall clock each frame; when a minute or more went missing and the save sent on the way out
+  is in with nothing played since, it starts a fresh session, so the server credits the gap on
+  its own clock (capped at 8 hours like any time away) and "While you were away" shows. Desktop
+  tabs, where both clocks run on, are untouched. Not yet watched on a real iPhone.
+- 2026-10-30 ([PR #43](https://github.com/TheRizz/personal-website/pull/43)): the game fits one phone screen. The records counter and settings button sit
   on the scene's top edge instead of above it, the scene takes 38 % of a box one screen tall
   (`svh`, so Safari's toolbar sliding away doesn't resize it mid-scroll), and after one scroll the
   counter, scene, tabs and at least two shop rows show together. Node labels now sit on the side
@@ -110,6 +108,7 @@ One line per run: date (UTC), what happened, PR link.
   zoom, tips; new items 1 (notes) and 2 added.
 - 2026-10-30: game fits one phone screen, with the label overlap and laptop toast fixes (scheduled
   run, [PR #43](https://github.com/TheRizz/personal-website/pull/43)).
+- 2026-10-30: offline time in a tab left open (scheduled run, [PR #44](https://github.com/TheRizz/personal-website/pull/44)).
 
 ## How the scheduled runs work
 

@@ -194,6 +194,53 @@ test("coming back to a tab whose save was cut off carries on without halting", a
   expect(errors).toEqual([]);
 });
 
+test("a phone that slept with the tab open gets the time credited as time away", async ({
+  page,
+}) => {
+  const errors = watchErrors(page);
+  // iOS stops performance.now() while the phone sleeps; Date.now() keeps real time. Fake that:
+  // the wall clock jumps an hour, the page's own clock doesn't.
+  await page.addInitScript(() => {
+    const realNow = Date.now.bind(Date);
+    Date.now = () => realNow() + ((window as { slept?: number }).slept ?? 0);
+  });
+  await play(page);
+  const setVisibility = (state: "hidden" | "visible") =>
+    page.evaluate((value) => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value });
+      Object.defineProperty(document, "hidden", { configurable: true, value: value === "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    }, state);
+
+  const saved = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/save"));
+  await setVisibility("hidden");
+  expect((await saved).status()).toBe(200);
+
+  // The local Worker's clock doesn't jump, so stand in for its answer to the new session.
+  let sessions = 0;
+  await page.route("**/api/tycoon/session", async (route) => {
+    sessions += 1;
+    const response = await route.fetch();
+    const body = (await response.json()) as { offline: { ms: number; earned: number } };
+    body.offline = { ms: 3_600_000, earned: 1234 };
+    await route.fulfill({ response, json: body });
+  });
+  await page.evaluate(() => ((window as { slept?: number }).slept = 3_600_000));
+  await setVisibility("visible");
+  const away = page.getByRole("dialog").filter({ hasText: "While you were away" });
+  await expect(away).toContainText("1h");
+  expect(sessions).toBe(1);
+  await away.getByRole("button", { name: "Back to work" }).click();
+  await expect(page.getByText("Pipeline halted")).toHaveCount(0);
+
+  // Saving carries on in the new session.
+  await page.getByRole("tab", { name: "Stats" }).click();
+  const next = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/save"));
+  await page.getByRole("button", { name: "Save now" }).click();
+  expect((await next).status()).toBe(200);
+  expect(errors).toEqual([]);
+});
+
 test("a save whose reply is lost mid-play keeps everything played since", async ({ page }) => {
   const errors = watchErrors(page, [
     /Failed to load resource/,
@@ -336,7 +383,10 @@ test.describe("on a phone", () => {
     const errors = watchErrors(page);
     const scene = await play(page);
     const game = scene.locator("xpath=../..");
-    await game.evaluate((el) => window.scrollBy(0, el.getBoundingClientRect().top - 8));
+    // Instant: the site scrolls smoothly, and a slow CI runner would measure mid-scroll.
+    await game.evaluate((el) =>
+      window.scrollBy({ top: el.getBoundingClientRect().top - 8, behavior: "instant" }),
+    );
     const inView = async (name: string, box: { y: number; height: number } | null) => {
       expect(box, name).not.toBeNull();
       expect(box!.y, `${name} top`).toBeGreaterThanOrEqual(0);
