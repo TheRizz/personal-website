@@ -1,0 +1,93 @@
+{
+  "name": "Ryan Martinez",
+  "headline": "Full Stack Software Engineer",
+  "location": "Riverside, CA",
+  "availability": "Open to remote and hybrid",
+  "email": "ryan.s.martinez96@gmail.com",
+  "links": [
+    { "label": "linkedin.com/in/rymartinez", "url": "https://www.linkedin.com/in/rymartinez/" },
+    { "label": "ry-mart.com", "url": "https://ry-mart.com" }
+  ],
+  "summary": "Full stack engineer with 6+ years building business software, from SaaS warehouse systems to manufacturing apps that hundreds of people use every shift. At Glenair I help replace a decades-old terminal system with React, TypeScript and Python, and set the frontend standards for a team of 10 to 15 engineers.",
+  "experience": [
+    {
+      "company": "Glenair, Inc.",
+      "title": "Full Stack Software Engineer",
+      "start": "Apr 2022",
+      "end": "Present",
+      "intro": "Modernization (MCU) team replacing \"Borg\", the company's legacy ASCII terminal system, with React, TypeScript, Python and SQL Server web apps.",
+      "bullets": [
+        "Built the quality control app used by 250 inspectors on 35,000 jobs a month: guided step-by-step inspections, customer requirement checks, trace validation, NCR, NCMR and MRB workflows, and certificates of conformance.",
+        "Built the stock picking app for 50 warehouse staff handling 15,000 picks a month, with inventory verification, trace history from stock to customer order, and a permission-gated admin console for resolving issues.",
+        "Built and migrated the 12M+ document company archive (30 years) to SQL Server and on-premises MinIO storage; new indexing cut searches from 10+ seconds to about 200 ms.",
+        "Set the team's frontend standards: created the template repository every new app starts from and a shared npm package, published by GitHub Actions, with authentication, navigation, global search, notifications, settings, widgets and strictly typed clients for 70 internal APIs.",
+        "Helped move the backend boilerplate from Flask to FastAPI, started a shared Python API package, and am helping adopt pytest and Playwright.",
+        "Mentored 12 engineers (5+ interns and 7 new hires): plan and delegate their work and review every change they commit."
+      ]
+    },
+    {
+      "company": "Wolin Design Group",
+      "title": "Full Stack Software Engineer",
+      "start": "Mar 2021",
+      "end": "Apr 2022",
+      "bullets": [
+        "Shipped enhancements to a SaaS warehouse management system (AngularJS, Java, PostgreSQL) running in 20+ large warehouses.",
+        "Took over building and rolling out customer deployments on AWS (EC2, RDS), including a Dockerized Python RF scanner app that floor staff used to move inventory between locations."
+      ]
+    },
+    {
+      "company": "Ohm Vision",
+      "title": "Software Engineer (Contract)",
+      "start": "Sep 2019",
+      "end": "Jan 2022",
+      "bullets": [
+        "Built custom EDI pipelines in .NET (C#) for 10+ medical records trading partners, mapping each partner's format to standard EDI and back, and verified every mapping with test cases."
+      ]
+    }
+  ],
+  "earlier": [
+    {
+      "company": "Iteris, Inc.",
+      "title": "IT Intern",
+      "start": "May 2019",
+      "end": "Jul 2020",
+      "line": "Helpdesk support; automated legacy system syncs with Apps Script."
+    },
+    {
+      "company": "The Coder School",
+      "title": "Lead Code Instructor",
+      "start": "Aug 2018",
+      "end": "May 2019",
+      "line": "Taught Python, Java and C++; coached new instructors."
+    }
+  ],
+  "projects": [
+    {
+      "name": "ry-mart.com",
+      "url": "https://ry-mart.com",
+      "line": "Personal site on Cloudflare Workers, D1 and R2 (React Router, TypeScript): blog editor behind Cloudflare Access that publishes through a GitHub App, photo uploads, and CI with Playwright end-to-end tests."
+    },
+    {
+      "name": "Online multiplayer volley game",
+      "url": "https://ry-mart.com/games/volley",
+      "line": "Real-time 1v1 over WebSockets with a server-run match on Durable Objects, client prediction and smoothing, and two-minute reconnects."
+    },
+    {
+      "name": "Taco Trek race tracker",
+      "line": "Live GPS tracking for a 300-runner 50K: spectator map, race control dashboard and missed-checkpoint alerts on Workers and D1, with batched uploads to keep database writes low."
+    }
+  ],
+  "skills": [
+    { "group": "Languages", "items": ["TypeScript", "JavaScript", "Python", "C#", "Java", "SQL"] },
+    { "group": "Frontend", "items": ["React", "React Router", "AngularJS", "Tailwind CSS"] },
+    { "group": "Backend", "items": ["FastAPI", "Flask", ".NET", "REST API design", "WebSockets"] },
+    { "group": "Data", "items": ["SQL Server", "PostgreSQL", "MySQL", "Cloudflare D1", "MinIO / S3"] },
+    { "group": "Cloud and DevOps", "items": ["GitHub Actions", "Cloudflare Workers", "AWS (EC2, RDS)", "Docker", "IIS"] },
+    { "group": "Testing", "items": ["Playwright", "pytest", "Vitest"] }
+  ],
+  "education": {
+    "school": "California State University, Fullerton",
+    "degree": "B.S. Computer Science",
+    "year": "2020"
+  }
+}
