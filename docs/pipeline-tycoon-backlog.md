@@ -54,7 +54,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-04 (in PR #PRNUM): install on the home screen. The game has a web app manifest and
+- 2026-11-04 (in [PR #51](https://github.com/TheRizz/personal-website/pull/51)): install on the home screen. The game has a web app manifest and
   its own icon (the scene's core with four tier nodes, on the scene's dark background), so on
   iPhone "Share, then Add to Home Screen" puts a "Tycoon" icon on the home screen that opens
   the game full screen with a black status bar; Android and desktop Chrome can install it too.
@@ -118,7 +118,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-10-30: offline time in a tab left open (scheduled run, [PR #44](https://github.com/TheRizz/personal-website/pull/44)).
 - 2026-10-30: golden packet you can't miss (scheduled run, [PR #45](https://github.com/TheRizz/personal-website/pull/45)).
 - 2026-11-04: PR #45 merged; keyboard help (scheduled run, [PR #48](https://github.com/TheRizz/personal-website/pull/48)).
-- 2026-11-04: PR #48 merged; install on the home screen (scheduled run, PR #PRNUM).
+- 2026-11-04: PR #48 merged; install on the home screen (scheduled run, [PR #51](https://github.com/TheRizz/personal-website/pull/51)).
 
 ## How the scheduled runs work
 
