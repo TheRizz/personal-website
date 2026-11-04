@@ -24,6 +24,7 @@ describe("AdminMenu", () => {
     expect(ADMIN_SECTIONS.map((section) => section.label)).toEqual([
       "Blog posts",
       "Photos",
+      "Projects",
       "Code snippets",
     ]);
   });

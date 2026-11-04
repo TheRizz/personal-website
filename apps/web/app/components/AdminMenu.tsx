@@ -11,6 +11,7 @@ import { IconGroup, iconButtonClass } from "./IconButton";
 export const ADMIN_SECTIONS: readonly { label: string; href?: string }[] = [
   { label: "Blog posts", href: "/admin" },
   { label: "Photos", href: "/admin/photos" },
+  { label: "Projects", href: "/admin/projects" },
   { label: "Code snippets" },
 ];
 

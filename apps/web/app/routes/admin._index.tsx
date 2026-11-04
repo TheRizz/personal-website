@@ -1,4 +1,4 @@
-import { FilePen, Images, Plus } from "lucide-react";
+import { FilePen, FolderKanban, Images, Plus } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { PageHeading } from "~/components/PageHeading";
@@ -67,6 +67,10 @@ export default function Drafts() {
           <Link to="/admin/photos" className={secondaryButton}>
             <Images aria-hidden="true" />
             Manage photos
+          </Link>
+          <Link to="/admin/projects" className={secondaryButton}>
+            <FolderKanban aria-hidden="true" />
+            Manage projects
           </Link>
           <button
             type="button"

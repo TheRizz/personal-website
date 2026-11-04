@@ -30,6 +30,10 @@ ownerTest("the owner opens the admin menu and goes to the blog drafts", async ({
   const menu = page.getByRole("navigation", { name: "Admin" });
   await expect(menu.getByRole("link", { name: "Blog posts" })).toHaveAttribute("href", "/admin");
   await expect(menu.getByRole("link", { name: "Photos" })).toHaveAttribute("href", "/admin/photos");
+  await expect(menu.getByRole("link", { name: "Projects" })).toHaveAttribute(
+    "href",
+    "/admin/projects",
+  );
   await expect(menu.getByText("Code snippets")).toBeVisible();
 
   await page.keyboard.press("Escape");

@@ -69,7 +69,7 @@ test("a live game rendered by the Worker connects its WebSocket", async ({ page,
 test("a prerendered page allows exactly its own inline scripts by hash", async ({ page }) => {
   await page.goto("/blog");
   const post = await page.locator('main a[href^="/blog/"]').first().getAttribute("href");
-  for (const path of ["/", post!]) {
+  for (const path of ["/blog", post!]) {
     const response = await page.request.get(path);
     const sources = await scriptSources(response);
     const scripts = inlineScripts(await response.text());

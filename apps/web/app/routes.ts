@@ -18,6 +18,7 @@ export default [
     route("drafts/:id", "routes/admin.drafts.$id.tsx"),
     route("posts/:slug", "routes/admin.posts.$slug.tsx"),
     route("photos", "routes/admin.photos.tsx"),
+    route("projects", "routes/admin.projects.tsx"),
   ]),
   // Sections that are built in later phases share one placeholder page.
   ...["resume", "snippets", "search"].map((path) =>
