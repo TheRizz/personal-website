@@ -42,6 +42,8 @@ import {
   type Hint,
   type HintId,
 } from "./hints";
+import { goldenOnScreen, isTypingTarget, keyAction, type KeyAction } from "./keys";
+import { KeysSheet } from "./KeysSheet";
 import { LinkDevice } from "./LinkDevice";
 import { SettingsSheet } from "./SettingsSheet";
 import { getSettings, updateSettings, useFormat, useSettings } from "./settings";
@@ -67,6 +69,8 @@ const UI_REFRESH_MS = 125;
 const TOAST_MS = 3_500;
 /** First-time tips stay up a little longer than other toasts. */
 const HINT_MS = 5_000;
+/** A note answering a key press is short-lived. */
+const KEY_TOAST_MS = 1_800;
 
 /** How many of a tier one press buys: the chosen amount, or whatever the bank allows for Max. */
 function buyCount(state: GameState, tier: number, amount: BuyAmount): number {
@@ -96,6 +100,7 @@ export function TycoonGame() {
   const { sound: soundOn } = useSettings();
   const fmt = useFormat();
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [keysOpen, setKeysOpen] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [goldenNote, setGoldenNote] = useState<string | null>(null);
   const [ending, setEnding] = useState(false);
@@ -203,20 +208,73 @@ export function TycoonGame() {
     updateSettings({ sound: next });
   }
 
-  function onSceneKey(event: React.KeyboardEvent) {
-    if (event.key === " " || event.key === "Enter") {
-      event.preventDefault();
-      if (!event.repeat) controller.click();
-    }
-    const digit = "1234567890".indexOf(event.key);
-    if (digit >= 0 && state) {
-      const count =
-        buyAmount === "max"
-          ? maxAffordable(state, digit)
-          : Math.min(buyAmount, affordableCount(state, digit, buyAmount));
-      if (count > 0) buyMany(controller, digit, count);
+  function runKey(action: KeyAction) {
+    switch (action.type) {
+      case "click":
+        controller.click();
+        return;
+      case "build": {
+        if (!state) return;
+        const { tier } = action;
+        const count =
+          buyAmount === "max"
+            ? maxAffordable(state, tier)
+            : Math.min(buyAmount, affordableCount(state, tier, buyAmount));
+        if (count > 0) buyMany(controller, tier, count);
+        return;
+      }
+      case "amount": {
+        const next = BUY_AMOUNTS[(BUY_AMOUNTS.indexOf(buyAmount) + 1) % BUY_AMOUNTS.length]!;
+        setBuyAmount(next);
+        showToast(
+          next === "max" ? "Builds buy as many as you can afford" : `Builds buy ${next} at a time`,
+          KEY_TOAST_MS,
+        );
+        return;
+      }
+      case "tab": {
+        const at = TABS.findIndex(({ id }) => id === tab);
+        setTab(TABS[(at + action.step + TABS.length) % TABS.length]!.id);
+        return;
+      }
+      case "golden": {
+        const index = state ? goldenOnScreen(state) : null;
+        if (index === null) showToast("No golden packet right now", KEY_TOAST_MS);
+        else controller.catchGolden(index);
+        return;
+      }
+      case "help":
+        setKeysOpen(true);
+        return;
     }
   }
+
+  // Keys work anywhere on the page (see keys.ts), but not while typing, while a sheet or notice
+  // is open, or before the game is running. The listener stays put; the latest render handles it.
+  const onKey = useRef(runKey);
+  useEffect(() => {
+    onKey.current = runKey;
+  });
+  useEffect(() => {
+    const listener = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || isTypingTarget(event.target)) return;
+      if (document.querySelector("dialog[open], [role=dialog][aria-modal=true]")) return;
+      if (controller.status.kind !== "playing") return;
+      const action = keyAction({
+        key: event.key,
+        ctrlKey: event.ctrlKey,
+        metaKey: event.metaKey,
+        altKey: event.altKey,
+        onScene: event.target === sceneRef.current,
+      });
+      if (!action) return;
+      event.preventDefault();
+      if (action.type === "click" && event.repeat) return;
+      onKey.current(action);
+    };
+    window.addEventListener("keydown", listener);
+    return () => window.removeEventListener("keydown", listener);
+  }, [controller]);
 
   // touch-manipulation: quick taps on the shop buy things instead of zooming the page (iOS).
   return (
@@ -241,6 +299,7 @@ export function TycoonGame() {
       )}
 
       <SettingsSheet open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <KeysSheet open={keysOpen} onClose={() => setKeysOpen(false)} />
 
       {/* On phones the box is one screen tall (svh, so Safari's toolbar sliding away doesn't
           resize the scene mid-scroll): after one scroll the counter, scene and shop show at once. */}
@@ -250,8 +309,7 @@ export function TycoonGame() {
             ref={sceneRef}
             role="button"
             tabIndex={0}
-            aria-label="Factory. Press space to process records, number keys to build."
-            onKeyDown={onSceneKey}
+            aria-label="Factory. Press space to process records, number keys to build, question mark for all keys."
             onPointerDown={() => soundOn && unlockAudio()}
             className="absolute inset-0 touch-manipulation bg-[#07090c] outline-none select-none focus-visible:ring-2 focus-visible:ring-cyan-300/60 focus-visible:ring-inset"
           >
@@ -322,7 +380,14 @@ export function TycoonGame() {
 
       <p className="mt-3 text-[0.8rem] text-muted">
         <span className="pointer-coarse:hidden">
-          Click the core (or focus it and press space) to process records. Keys 1–0 build.
+          Click the core (or focus it and press space) to process records. Keys 1–0 build;{" "}
+          <button
+            onClick={() => setKeysOpen(true)}
+            className="underline decoration-line underline-offset-2 hover:text-fg"
+          >
+            press ? for all keys
+          </button>
+          .
         </span>
         <span className="hidden pointer-coarse:inline">
           Tap the core to process records; two thumbs work too.
