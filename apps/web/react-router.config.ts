@@ -3,8 +3,8 @@ import path from "node:path";
 import type { Config } from "@react-router/dev/config";
 import { writeStaticHeaders } from "./static-headers";
 
+// The home page and /photos are left out: the Worker renders them from D1 on each request.
 const STATIC_ROUTES = [
-  "/",
   "/blog",
   "/resume",
   "/snippets",

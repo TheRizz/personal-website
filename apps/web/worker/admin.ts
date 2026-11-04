@@ -4,6 +4,7 @@ import { jsonError, methodNotAllowed } from "./api";
 import { handleDrafts } from "./drafts";
 import { handleImages } from "./images";
 import { handlePhotos } from "./photos";
+import { handleProjects } from "./projects";
 import { handlePublishing } from "./publish";
 
 // The admin router. index.ts mounts it behind `requireOwner`, so it only ever sees requests from
@@ -13,6 +14,7 @@ import { handlePublishing } from "./publish";
 const DRAFT = "/api/admin/drafts/00000000-0000-4000-8000-000000000000";
 const IMAGE = "/api/admin/images/00000000-0000-4000-8000-000000000000";
 const PHOTO = "/api/admin/photos/00000000-0000-4000-8000-000000000000";
+const PROJECT = "/api/admin/projects/00000000-0000-4000-8000-000000000000";
 export const ADMIN_API_ROUTES = [
   { method: "GET", path: "/api/admin/me" },
   { method: "GET", path: "/api/admin/drafts" },
@@ -36,6 +38,10 @@ export const ADMIN_API_ROUTES = [
   { method: "PUT", path: `${PHOTO}/480` },
   { method: "PATCH", path: PHOTO },
   { method: "DELETE", path: PHOTO },
+  { method: "GET", path: "/api/admin/projects" },
+  { method: "POST", path: "/api/admin/projects" },
+  { method: "PATCH", path: PROJECT },
+  { method: "DELETE", path: PROJECT },
 ] as const;
 
 /** Admin page paths, also walked by the route-auth test. */
@@ -44,6 +50,7 @@ export const ADMIN_PAGES = [
   "/admin/drafts/example",
   "/admin/posts/example",
   "/admin/photos",
+  "/admin/projects",
 ] as const;
 
 /**
@@ -76,6 +83,8 @@ export async function handleAdmin(
   if (images) return images;
   const photos = await handlePhotos(request, env);
   if (photos) return photos;
+  const projects = await handleProjects(request, env);
+  if (projects) return projects;
   const publishing = await handlePublishing(request, env, ctx);
   if (publishing) return publishing;
   return jsonError(404, "not_found", "No such API route.");
