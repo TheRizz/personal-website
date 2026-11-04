@@ -37,6 +37,12 @@ function tone(
   oscillator.stop(start + duration);
 }
 
+/** A soft two-note chime when a golden packet appears (catching it plays the brighter run). */
+export function playGoldenChime() {
+  tone(1319, 0.25, "sine", 0.035);
+  tone(1760, 0.35, "sine", 0.03, 1, 0.12);
+}
+
 export function playEvent(event: GameEvent) {
   switch (event.type) {
     case "click":

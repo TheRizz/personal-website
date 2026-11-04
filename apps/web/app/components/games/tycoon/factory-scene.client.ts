@@ -13,7 +13,16 @@ import {
 
 import { TIER_COLOURS } from "./colours";
 import { factoryLayout, labelPlacement, nodeRadius } from "./factory-layout";
+import {
+  GoldenWatch,
+  goldenPoint,
+  goldenTrail,
+  ringSweep,
+  secondsLeft,
+  trailPulse,
+} from "./golden-visual";
 import type { TycoonSettings } from "./settings";
+import { playGoldenChime } from "./sound";
 
 // The live "factory": a dark neon schematic drawn in code (no image assets, so the CSP needs no
 // data:/blob: textures). Tiers appear as nodes around the core as you buy them, links glow, and
@@ -42,12 +51,17 @@ interface Burst {
   colour: number;
 }
 
+/** Told when a golden packet arrives (with a line for screen readers) and when it goes. */
+export type GoldenNotice = (text: string | null) => void;
+
 /** Short labels for the nodes. */
 const LABELS = ["CSV", "CRON", "SFTP", "REST", "MQ", "ETL", "LAKE", "MESH", "SAT", "GRID"];
 
 class FactoryScene extends Phaser.Scene {
   private controller!: TycoonController;
   private settings!: () => TycoonSettings;
+  private onGolden: GoldenNotice = () => {};
+  private goldenWatch = new GoldenWatch();
   private graphics!: Phaser.GameObjects.Graphics;
   private labels: Phaser.GameObjects.Text[] = [];
   private coreLabel!: Phaser.GameObjects.Text;
@@ -62,9 +76,14 @@ class FactoryScene extends Phaser.Scene {
     super("factory");
   }
 
-  init(data: { controller: TycoonController; settings: () => TycoonSettings }) {
+  init(data: {
+    controller: TycoonController;
+    settings: () => TycoonSettings;
+    onGolden?: GoldenNotice;
+  }) {
     this.controller = data.controller;
     this.settings = data.settings;
+    if (data.onGolden) this.onGolden = data.onGolden;
   }
 
   private format(value: number) {
@@ -103,8 +122,13 @@ class FactoryScene extends Phaser.Scene {
     const spawn = upcomingGolden(state.golden, state.playMs);
     const progress = (state.playMs - spawn.at) / spawn.visibleMs;
     if (progress < 0 || progress > 1) return null;
-    const y = top + area * (0.18 + spawn.lane * 0.64) + Math.sin(progress * Math.PI * 4) * 10;
-    return { index: spawn.index, x: -20 + progress * (width + 40), y, progress };
+    return {
+      index: spawn.index,
+      ...goldenPoint(progress, spawn.lane, width, top, area),
+      progress,
+      lane: spawn.lane,
+      visibleMs: spawn.visibleMs,
+    };
   }
 
   private handlePointer(pointer: Phaser.Input.Pointer) {
@@ -292,12 +316,35 @@ class FactoryScene extends Phaser.Scene {
       return true;
     });
 
-    // The golden packet, while it's on screen.
+    // The golden packet, while it's on screen: a pulsing trail behind it, a ring that empties as
+    // its time runs out, and a soft chime and a spoken line when it arrives.
     const golden = this.goldenPosition(state, width, top, area);
+    const change = this.goldenWatch.update(golden?.index ?? null);
+    if (change === "arrived" && golden) {
+      if (this.settings().sound) playGoldenChime();
+      const seconds = secondsLeft(golden.progress, golden.visibleMs);
+      this.onGolden(`Golden packet in the factory: tap it within ${seconds} seconds.`);
+    } else if (change === "left") {
+      this.onGolden(null);
+    }
     if (golden) {
+      const pulse = trailPulse(this.time.now, still);
+      for (const dot of goldenTrail(golden.progress)) {
+        const at = goldenPoint(dot.progress, golden.lane, width, top, area);
+        g.fillStyle(GOLD, dot.alpha * pulse);
+        g.fillCircle(at.x, at.y, 3 + dot.alpha * 6);
+      }
       const size = still ? 12 : 11 + Math.sin(this.time.now / 120) * 2;
       g.fillStyle(GOLD, 0.18);
       g.fillCircle(golden.x, golden.y, size * 2.2);
+      // Time left: the faint full circle is the whole 12 s, the bright arc what remains.
+      const ring = size * 2.2 + 4;
+      g.lineStyle(2, GOLD, 0.2);
+      g.strokeCircle(golden.x, golden.y, ring);
+      g.lineStyle(2.5, GOLD, 0.95);
+      g.beginPath();
+      g.arc(golden.x, golden.y, ring, -Math.PI / 2, -Math.PI / 2 + ringSweep(golden.progress));
+      g.strokePath();
       g.fillStyle(GOLD, 1);
       g.fillTriangle(
         golden.x,
@@ -324,6 +371,7 @@ export function mountFactory(
   parent: HTMLElement,
   controller: TycoonController,
   settings: () => TycoonSettings,
+  onGolden?: GoldenNotice,
 ): () => void {
   const game = new Phaser.Game({
     type: Phaser.AUTO,
@@ -340,7 +388,7 @@ export function mountFactory(
     render: { antialias: true },
     scene: [],
   });
-  game.scene.add("factory", FactoryScene, true, { controller, settings });
+  game.scene.add("factory", FactoryScene, true, { controller, settings, onGolden });
   // Belt and braces: a new touch frees any pointer still held by a finger that has gone.
   const releaseLost = (event: TouchEvent) => {
     const live = new Set(Array.from(event.touches, (touch) => touch.identifier));
