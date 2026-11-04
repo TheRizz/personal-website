@@ -10,38 +10,36 @@ old tabs are told to reload, and the CLI needs a new release (docs/04-pipeline-t
 
 ## Up next
 
-1. **Keyboard help** (S, UI, no rules bump). `?` opens a small list of keys (space, 1–0, x for
-   amount, tab switching, g to catch a golden packet like the CLI); mention it in the hint line.
-2. **Install on the home screen** (M, no rules bump). A web app manifest scoped to
+1. **Install on the home screen** (M, no rules bump). A web app manifest scoped to
    `/games/pipeline-tycoon` with an icon drawn from the core node, `display: standalone`, and
    theme colour from the scene, so iPhone "Add to Home Screen" opens the game full screen.
-3. **Unsaved-play safety net** (M, save robustness). Keep the pending action log in localStorage
+2. **Unsaved-play safety net** (M, save robustness). Keep the pending action log in localStorage
    between saves so a killed tab (iOS memory pressure) does not lose up to 5 minutes; on the next
    load, send it as the first save of the new session if the server's seq still matches, otherwise
    drop it. Needs a careful server-side check and e2e test; read ADR-0006 first.
-4. **Performance pass** (M). Cap live packets and particles at high tiers, measure frame time at
+3. **Performance pass** (M). Cap live packets and particles at high tiers, measure frame time at
    iPhone width with CPU throttling in Playwright, record before/after numbers in the PR. (Phaser
    already pauses itself when the tab is hidden.)
-5. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
+4. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
    own 100 interns and nothing else, migrate with exactly 1 AP, 10 minutes without clicking, buy
    an upgrade within a second of affording it, own one of every tier, reach the ending without
    clicking after the first migration. Batch with another rules-bump item when possible.
-6. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
+5. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
    cap to 12 h then 24 h. Needs a "spend AP" control in the Migrate tab (AP stay a production
    bonus otherwise).
-7. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
+6. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
     time between purchases, look for walls of more than ~3 minutes with nothing to buy; retune only
     inside the pacing test's targets.
-8. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
+7. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
     `[A-Za-z0-9_]`, profanity filter), top 50 by lifetime Records, cached a few minutes. New
     expand-only migration in `apps/web/migrations-tycoon/` (deploy applies it).
-9. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
+8. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
     board; CLI panel.
-10. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
-11. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
+9. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
+10. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
     using the Web Share API on phones (copy to clipboard elsewhere): "I migrated my data platform
     3 times and processed 4.2 trillion records in Pipeline Tycoon" with the page link.
-12. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
+11. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
     the two stay alike; patch release, Ryan pushes the tag.
 
 ## Needs Ryan first
@@ -59,7 +57,12 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-10-30 (in [PR #45](https://github.com/TheRizz/personal-website/pull/45)): golden packet you can't miss. It now leaves a pulsing gold trail, wears a
+- 2026-11-04 (in PR): keyboard help. Keys now work anywhere on the page, not only with the
+  factory focused: 1–0 build, x changes the buy amount, ← and → switch shop tabs, g catches the
+  golden packet (as in the CLI), and ? opens a list of them, also linked from the help line under
+  the game. Space still only taps the core when it is focused, keys stay out of text fields and
+  open sheets, and browser shortcuts (cmd+1 and so on) are left alone.
+- 2026-10-30 ([PR #45](https://github.com/TheRizz/personal-website/pull/45)): golden packet you can't miss. It now leaves a pulsing gold trail, wears a
   ring that empties as its 12 seconds run out, plays a soft chime when it appears (if sound is
   on) and is announced to screen readers. Reduced motion keeps the trail steady.
 - 2026-10-30 ([PR #44](https://github.com/TheRizz/personal-website/pull/44)): offline time in a tab left open. A phone that sleeps with the game open
@@ -111,6 +114,7 @@ One line per run: date (UTC), what happened, PR link.
   run, [PR #43](https://github.com/TheRizz/personal-website/pull/43)).
 - 2026-10-30: offline time in a tab left open (scheduled run, [PR #44](https://github.com/TheRizz/personal-website/pull/44)).
 - 2026-10-30: golden packet you can't miss (scheduled run, [PR #45](https://github.com/TheRizz/personal-website/pull/45)).
+- 2026-11-04: PR #45 merged; keyboard help (scheduled run, PR pending).
 
 ## How the scheduled runs work
 

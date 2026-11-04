@@ -374,6 +374,58 @@ test("on a laptop a tip shows near the top of the scene, above the fold", async 
   expect(box.y - sceneBox.y).toBeLessThan(100);
 });
 
+test("keys play the game and ? lists them", async ({ page }) => {
+  const errors = watchErrors(page);
+  const scene = await play(page);
+  const keys = page.getByRole("dialog", { name: "Keyboard keys" });
+
+  // The help line under the game points at the list.
+  await page.getByRole("button", { name: "press ? for all keys" }).click();
+  await expect(keys).toBeVisible();
+  await expect(keys).toContainText("Catch the golden packet");
+  await page.keyboard.press("Escape");
+  await expect(keys).toBeHidden();
+
+  // Space on the factory, then 1 builds an intern without touching the shop.
+  await scene.focus();
+  for (let i = 0; i < 24; i++) {
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(55);
+  }
+  const intern = page.getByRole("button", { name: /Intern/ });
+  await page.keyboard.press("1");
+  await expect(intern.getByLabel(/owned$/)).toHaveText("1");
+
+  // x walks through the buy amounts; the arrows walk through the shop tabs.
+  const amounts = page.getByRole("group", { name: "Buy amount" });
+  await page.keyboard.press("x");
+  await expect(amounts.getByRole("button", { name: "×10", exact: true })).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(scene.getByRole("status")).toHaveText("Builds buy 10 at a time");
+  await page.keyboard.press("ArrowRight");
+  await expect(page.getByRole("tab", { name: /Upgrades/ })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.getByRole("tab", { name: "Stats" })).toHaveAttribute("aria-selected", "true");
+
+  // g with no golden packet about says so; ? from anywhere opens the list.
+  await page.keyboard.press("g");
+  await expect(scene.getByRole("status")).toHaveText("No golden packet right now");
+  await page.keyboard.press("?");
+  await expect(keys).toBeVisible();
+  await page.screenshot({ path: "test-results/tycoon-keys-laptop.png" });
+  // Keys do nothing while the list is open.
+  await page.keyboard.press("ArrowRight");
+  await keys.getByRole("button", { name: "Close keyboard keys" }).click();
+  await expect(page.getByRole("tab", { name: "Stats" })).toHaveAttribute("aria-selected", "true");
+  expect(errors).toEqual([]);
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
