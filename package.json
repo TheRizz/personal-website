@@ -28,7 +28,7 @@
     "@site/content-markdown": "workspace:*",
     "@site/content-schema": "workspace:*",
     "@site/tycoon-core": "workspace:*",
-    "@types/node": "^24.0.0",
+    "@types/node": "^26.6.6",
     "@vitest/coverage-v8": "^5.0.3",
     "docx": "^9.15.2",
     "eslint": "^10.12.0",
