@@ -6,6 +6,8 @@
     "react-router.config.ts",
     "static-headers.ts",
     "static-headers.test.ts",
+    "resume-downloads.test.ts",
+    "resume-hash.ts",
     "worker/security-headers.ts"
   ],
   "compilerOptions": {

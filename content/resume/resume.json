@@ -81,8 +81,14 @@
     { "group": "Languages", "items": ["TypeScript", "JavaScript", "Python", "C#", "Java", "SQL"] },
     { "group": "Frontend", "items": ["React", "React Router", "AngularJS", "Tailwind CSS"] },
     { "group": "Backend", "items": ["FastAPI", "Flask", ".NET", "REST API design", "WebSockets"] },
-    { "group": "Data", "items": ["SQL Server", "PostgreSQL", "MySQL", "Cloudflare D1", "MinIO / S3"] },
-    { "group": "Cloud and DevOps", "items": ["GitHub Actions", "Cloudflare Workers", "AWS (EC2, RDS)", "Docker", "IIS"] },
+    {
+      "group": "Data",
+      "items": ["SQL Server", "PostgreSQL", "MySQL", "Cloudflare D1", "MinIO / S3"]
+    },
+    {
+      "group": "Cloud and DevOps",
+      "items": ["GitHub Actions", "Cloudflare Workers", "AWS (EC2, RDS)", "Docker", "IIS"]
+    },
     { "group": "Testing", "items": ["Playwright", "pytest", "Vitest"] }
   ],
   "education": {

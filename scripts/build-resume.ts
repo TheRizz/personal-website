@@ -24,7 +24,8 @@ import {
   TextRun,
 } from "docx";
 import { chromium } from "@playwright/test";
-import { resumeSourceHash, type Resume } from "./resume-source.ts";
+import { resumeSourceHash } from "../apps/web/resume-hash";
+import type { Resume } from "../apps/web/app/lib/resume";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = join(root, "apps/web/public/resume");
@@ -40,7 +41,9 @@ const dates = (e: { start: string; end: string }) => `${e.start} – ${e.end}`;
 
 function font(weight: number): string {
   const require = createRequire(join(root, "apps/web/package.json"));
-  const file = require.resolve(`@fontsource/geist-sans/files/geist-sans-latin-${weight}-normal.woff2`);
+  const file = require.resolve(
+    `@fontsource/geist-sans/files/geist-sans-latin-${weight}-normal.woff2`,
+  );
   const data = readFileSync(file).toString("base64");
   return `@font-face{font-family:Geist;font-weight:${weight};src:url(data:font/woff2;base64,${data}) format("woff2")}`;
 }
@@ -95,7 +98,10 @@ function html(r: Resume): string {
     )
     .join("")}</div>
   <h2>Projects</h2><ul>${r.projects
-    .map((p) => `<li><b>${p.url ? `<a href="${esc(p.url)}">${esc(p.name)}</a>` : esc(p.name)}</b>: ${esc(p.line)}</li>`)
+    .map(
+      (p) =>
+        `<li><b>${p.url ? `<a href="${esc(p.url)}">${esc(p.name)}</a>` : esc(p.name)}</b>: ${esc(p.line)}</li>`,
+    )
     .join("")}</ul>
   <h2>Skills</h2><dl class="skills">${r.skills
     .map((s) => `<dt>${esc(s.group)}</dt><dd>${esc(s.items.join(", "))}</dd>`)
@@ -111,10 +117,16 @@ async function pdf(r: Resume): Promise<Buffer> {
   try {
     const page = await browser.newPage();
     await page.setContent(html(r), { waitUntil: "load" });
-    await page.evaluate(() => document.fonts.ready);
-    const out = await page.pdf({ format: "Letter", printBackground: true, preferCSSPageSize: true, tagged: true });
+    await page.evaluate("document.fonts.ready");
+    const out = await page.pdf({
+      format: "Letter",
+      printBackground: true,
+      preferCSSPageSize: true,
+      tagged: true,
+    });
     const pages = out.toString("latin1").match(/\/Type\s*\/Page[^s]/g)?.length ?? 0;
-    if (pages > 1) console.warn(`Warning: the PDF runs to ${pages} pages; trim resume.json to fit one.`);
+    if (pages > 1)
+      console.warn(`Warning: the PDF runs to ${pages} pages; trim resume.json to fit one.`);
     return out;
   } finally {
     await browser.close();
@@ -130,14 +142,33 @@ const ACCENT = "0E7490";
 const PT = 2; // docx sizes are half-points
 const RIGHT_TAB = 10_440; // twips: 8.5in page minus margins
 
-const run = (text: string, o: { bold?: boolean; color?: string; size?: number; italics?: boolean } = {}) =>
-  new TextRun({ text, bold: o.bold, italics: o.italics, color: o.color ?? BODY, size: (o.size ?? 10) * PT, font: "Calibri" });
+const run = (
+  text: string,
+  o: { bold?: boolean; color?: string; size?: number; italics?: boolean } = {},
+) =>
+  new TextRun({
+    text,
+    bold: o.bold,
+    italics: o.italics,
+    color: o.color ?? BODY,
+    size: (o.size ?? 10) * PT,
+    font: "Calibri",
+  });
 
 const heading = (text: string) =>
   new Paragraph({
     spacing: { before: 200, after: 80 },
     border: { bottom: { style: BorderStyle.SINGLE, size: 4, color: "D4D4D8", space: 2 } },
-    children: [new TextRun({ text: text.toUpperCase(), bold: true, color: INK, size: 9.5 * PT, font: "Calibri", characterSpacing: 20 })],
+    children: [
+      new TextRun({
+        text: text.toUpperCase(),
+        bold: true,
+        color: INK,
+        size: 9.5 * PT,
+        font: "Calibri",
+        characterSpacing: 20,
+      }),
+    ],
   });
 
 const roleLine = (company: string, title: string, when: string, extra?: string) =>
@@ -185,27 +216,53 @@ async function docx(r: Resume): Promise<Buffer> {
     },
     sections: [
       {
-        properties: { page: { size: { width: 12_240, height: 15_840 }, margin: { top: 720, bottom: 720, left: 792, right: 792 } } },
+        properties: {
+          page: {
+            size: { width: 12_240, height: 15_840 },
+            margin: { top: 720, bottom: 720, left: 792, right: 792 },
+          },
+        },
         children: [
           new Paragraph({ children: [run(r.name, { bold: true, color: INK, size: 22 })] }),
-          new Paragraph({ children: [run(`${r.headline} · ${r.availability}`, { color: ACCENT, size: 11.5 })] }),
+          new Paragraph({
+            children: [run(`${r.headline} · ${r.availability}`, { color: ACCENT, size: 11.5 })],
+          }),
           new Paragraph({ spacing: { before: 60 }, children: contact }),
           heading("Summary"),
           new Paragraph({ children: [run(r.summary)] }),
           heading("Experience"),
           ...r.experience.flatMap((e) => [
             roleLine(e.company, e.title, dates(e)),
-            ...(e.intro ? [new Paragraph({ spacing: { after: 30 }, children: [run(e.intro, { color: MUTED })] })] : []),
+            ...(e.intro
+              ? [
+                  new Paragraph({
+                    spacing: { after: 30 },
+                    children: [run(e.intro, { color: MUTED })],
+                  }),
+                ]
+              : []),
             ...e.bullets.map((b) => bullet([run(b)])),
           ]),
           ...r.earlier.map((e) => roleLine(e.company, e.title, dates(e), e.line)),
           heading("Projects"),
           ...r.projects.map((p) =>
-            bullet([p.url ? link(p.name, p.url, { bold: true, color: INK }) : run(p.name, { bold: true, color: INK }), run(`: ${p.line}`)]),
+            bullet([
+              p.url
+                ? link(p.name, p.url, { bold: true, color: INK })
+                : run(p.name, { bold: true, color: INK }),
+              run(`: ${p.line}`),
+            ]),
           ),
           heading("Skills"),
           ...r.skills.map(
-            (s) => new Paragraph({ spacing: { after: 20 }, children: [run(`${s.group}: `, { bold: true, color: INK }), run(s.items.join(", "))] }),
+            (s) =>
+              new Paragraph({
+                spacing: { after: 20 },
+                children: [
+                  run(`${s.group}: `, { bold: true, color: INK }),
+                  run(s.items.join(", ")),
+                ],
+              }),
           ),
           heading("Education"),
           roleLine(r.education.school, r.education.degree, r.education.year),
