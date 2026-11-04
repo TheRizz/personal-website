@@ -18,6 +18,7 @@
     "test": "vitest run",
     "e2e": "playwright test",
     "e2e:keys": "tsx scripts/e2e-keys.ts",
+    "tycoon:icons": "tsx scripts/build-tycoon-icons.ts",
     "app-token": "tsx scripts/app-token.ts",
     "format": "prettier --write .",
     "format:check": "prettier --check ."

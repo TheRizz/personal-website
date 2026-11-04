@@ -426,6 +426,41 @@ test("keys play the game and ? lists them", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test("the game can be installed: manifest and icons are served", async ({ page, request }) => {
+  await page.goto("/games/pipeline-tycoon");
+  const href = await page.locator('link[rel="manifest"]').getAttribute("href");
+  expect(href).toBe("/games/pipeline-tycoon/manifest.webmanifest");
+  const touchIcon = await page.locator('link[rel="apple-touch-icon"]').getAttribute("href");
+  await expect(page.locator('meta[name="apple-mobile-web-app-capable"]')).toHaveAttribute(
+    "content",
+    "yes",
+  );
+
+  const response = await request.get(href!);
+  expect(response.ok()).toBe(true);
+  const manifest = (await response.json()) as {
+    start_url: string;
+    scope: string;
+    display: string;
+    icons: { src: string; sizes: string; type: string }[];
+  };
+  expect(manifest.display).toBe("standalone");
+  expect(manifest.start_url.startsWith(manifest.scope)).toBe(true);
+  // Every icon (and the iPhone one) is there, is the type it says, and a PNG is the size it says.
+  for (const icon of [
+    ...manifest.icons,
+    { src: touchIcon!, sizes: "180x180", type: "image/png" },
+  ]) {
+    const file = await request.get(icon.src);
+    expect(file.ok(), icon.src).toBe(true);
+    expect(file.headers()["content-type"], icon.src).toContain(icon.type);
+    if (icon.type !== "image/png") continue;
+    const png = await file.body();
+    const [width, height] = [png.readUInt32BE(16), png.readUInt32BE(20)];
+    expect(`${width}x${height}`, icon.src).toBe(icon.sizes);
+  }
+});
+
 test.describe("on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
@@ -560,6 +595,30 @@ test.describe("on a phone", () => {
     // It flies off after its 12 seconds and the notice clears.
     await expect(note).toHaveText("", { timeout: 10_000 });
     expect(errors).toEqual([]);
+  });
+
+  test("the help line says how to put the game on the home screen", async ({ page }) => {
+    await play(page);
+    await expect(page.getByTestId("install-hint")).toBeVisible();
+    await page.getByTestId("install-hint").scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "test-results/tycoon-install-hint-phone.png" });
+    // Opened from the home screen it is already installed, so the tip goes. Chromium can't
+    // emulate display-mode, so look for the rule that hides it there.
+    const hidden = await page.getByTestId("install-hint").evaluate((hint) => {
+      // Tailwind puts the rule inside a cascade layer, so walk every grouping rule.
+      const walk = (rules: CSSRuleList, standalone: boolean): boolean =>
+        Array.from(rules).some((rule) => {
+          if (rule instanceof CSSStyleRule && standalone && hint.matches(rule.selectorText)) {
+            return rule.style.display === "none";
+          }
+          if (!(rule instanceof CSSGroupingRule)) return false;
+          const media =
+            rule instanceof CSSMediaRule && /display-mode:\s*standalone/.test(rule.conditionText);
+          return walk(rule.cssRules, standalone || media);
+        });
+      return Array.from(document.styleSheets).some((sheet) => walk(sheet.cssRules, false));
+    });
+    expect(hidden).toBe(true);
   });
 
   test("sound moves into the settings sheet", async ({ page }) => {

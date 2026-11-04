@@ -390,7 +390,10 @@ export function TycoonGame() {
           .
         </span>
         <span className="hidden pointer-coarse:inline">
-          Tap the core to process records; two thumbs work too.
+          Tap the core to process records; two thumbs work too.{" "}
+          <span data-testid="install-hint" className="[@media(display-mode:standalone)]:hidden">
+            To play full screen, tap Share, then Add to Home Screen.
+          </span>
         </span>{" "}
         Progress is saved to the server every few minutes and when you leave.
       </p>
