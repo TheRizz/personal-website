@@ -57,7 +57,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-04 (in PR): keyboard help. Keys now work anywhere on the page, not only with the
+- 2026-11-04 (in [PR #48](https://github.com/TheRizz/personal-website/pull/48)): keyboard help. Keys now work anywhere on the page, not only with the
   factory focused: 1–0 build, x changes the buy amount, ← and → switch shop tabs, g catches the
   golden packet (as in the CLI), and ? opens a list of them, also linked from the help line under
   the game. Space still only taps the core when it is focused, keys stay out of text fields and
@@ -114,7 +114,7 @@ One line per run: date (UTC), what happened, PR link.
   run, [PR #43](https://github.com/TheRizz/personal-website/pull/43)).
 - 2026-10-30: offline time in a tab left open (scheduled run, [PR #44](https://github.com/TheRizz/personal-website/pull/44)).
 - 2026-10-30: golden packet you can't miss (scheduled run, [PR #45](https://github.com/TheRizz/personal-website/pull/45)).
-- 2026-11-04: PR #45 merged; keyboard help (scheduled run, PR pending).
+- 2026-11-04: PR #45 merged; keyboard help (scheduled run, [PR #48](https://github.com/TheRizz/personal-website/pull/48)).
 
 ## How the scheduled runs work
 
