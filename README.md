@@ -7,7 +7,7 @@ Actions, and the only running cost is the domain (about $10–12 per year).
 
 > **Status:** the scaffold, deploy pipeline, site shell, blog and games are built (most of
 > Phase 1, Step 2.1, a first cut of Step 3.2, and Phases 7–8). Tic-tac-toe is live on ry-mart.com.
-> Resume, snippets, photos and search are placeholder pages.
+> Snippets and search are placeholder pages. The resume lives in content/resume/resume.json; run `pnpm resume` after editing it to rebuild the PDF and Word downloads.
 > The visual style is modelled on [godobject.dev](https://godobject.dev/).
 
 ## Quickstart
