@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Pipeline Tycoon home-screen icon: the scene's core with four tier nodes. Source for
+       the PNGs next to it (pnpm tycoon:icons). Keep everything inside the central 80 %%
+       circle so Android's maskable crop does not cut it. -->
+  <rect width="512" height="512" fill="#07090c"/>
+  <path d="M16 0V512 M48 0V512 M80 0V512 M112 0V512 M144 0V512 M176 0V512 M208 0V512 M240 0V512 M272 0V512 M304 0V512 M336 0V512 M368 0V512 M400 0V512 M432 0V512 M464 0V512 M496 0V512 M0 16H512 M0 48H512 M0 80H512 M0 112H512 M0 144H512 M0 176H512 M0 208H512 M0 240H512 M0 272H512 M0 304H512 M0 336H512 M0 368H512 M0 400H512 M0 432H512 M0 464H512 M0 496H512" stroke="#0f1720" stroke-width="2"/>
+  <g stroke="#22d3ee"><line x1="107.0" y1="170.0" x2="256" y2="256" stroke-width="12" stroke-opacity=".08"/><line x1="107.0" y1="170.0" x2="256" y2="256" stroke-width="3" stroke-opacity=".5"/></g>
+  <circle cx="163.6" cy="202.7" r="9" fill="#22d3ee" fill-opacity=".25"/><circle cx="163.6" cy="202.7" r="4" fill="#22d3ee"/>
+  <circle cx="205.4" cy="226.8" r="9" fill="#22d3ee" fill-opacity=".25"/><circle cx="205.4" cy="226.8" r="4" fill="#22d3ee"/>
+  <circle cx="107.0" cy="170.0" r="29.3" fill="#22d3ee" fill-opacity=".12"/><circle cx="107.0" cy="170.0" r="22" fill="#07090c" stroke="#22d3ee" stroke-width="4"/>
+  <g stroke="#34d399"><line x1="405.0" y1="170.0" x2="256" y2="256" stroke-width="12" stroke-opacity=".08"/><line x1="405.0" y1="170.0" x2="256" y2="256" stroke-width="3" stroke-opacity=".5"/></g>
+  <circle cx="348.4" cy="202.7" r="9" fill="#34d399" fill-opacity=".25"/><circle cx="348.4" cy="202.7" r="4" fill="#34d399"/>
+  <circle cx="306.6" cy="226.8" r="9" fill="#34d399" fill-opacity=".25"/><circle cx="306.6" cy="226.8" r="4" fill="#34d399"/>
+  <circle cx="405.0" cy="170.0" r="29.3" fill="#34d399" fill-opacity=".12"/><circle cx="405.0" cy="170.0" r="22" fill="#07090c" stroke="#34d399" stroke-width="4"/>
+  <g stroke="#facc15"><line x1="342.0" y1="405.0" x2="256" y2="256" stroke-width="12" stroke-opacity=".08"/><line x1="342.0" y1="405.0" x2="256" y2="256" stroke-width="3" stroke-opacity=".5"/></g>
+  <circle cx="309.3" cy="348.4" r="9" fill="#facc15" fill-opacity=".25"/><circle cx="309.3" cy="348.4" r="4" fill="#facc15"/>
+  <circle cx="285.2" cy="306.6" r="9" fill="#facc15" fill-opacity=".25"/><circle cx="285.2" cy="306.6" r="4" fill="#facc15"/>
+  <circle cx="342.0" cy="405.0" r="29.3" fill="#facc15" fill-opacity=".12"/><circle cx="342.0" cy="405.0" r="22" fill="#07090c" stroke="#facc15" stroke-width="4"/>
+  <g stroke="#f472b6"><line x1="107.0" y1="342.0" x2="256" y2="256" stroke-width="12" stroke-opacity=".08"/><line x1="107.0" y1="342.0" x2="256" y2="256" stroke-width="3" stroke-opacity=".5"/></g>
+  <circle cx="163.6" cy="309.3" r="9" fill="#f472b6" fill-opacity=".25"/><circle cx="163.6" cy="309.3" r="4" fill="#f472b6"/>
+  <circle cx="205.4" cy="285.2" r="9" fill="#f472b6" fill-opacity=".25"/><circle cx="205.4" cy="285.2" r="4" fill="#f472b6"/>
+  <circle cx="107.0" cy="342.0" r="29.3" fill="#f472b6" fill-opacity=".12"/><circle cx="107.0" cy="342.0" r="22" fill="#07090c" stroke="#f472b6" stroke-width="4"/>
+  <circle cx="256" cy="256" r="148.2" fill="#22d3ee" fill-opacity=".06"/>
+  <circle cx="256" cy="256" r="105.3" fill="#22d3ee" fill-opacity=".12"/>
+  <circle cx="256" cy="256" r="78" fill="#07090c" stroke="#22d3ee" stroke-width="6"/>
+  <circle cx="256" cy="256" r="48.4" fill="none" stroke="#22d3ee" stroke-opacity=".5" stroke-width="2.5"/>
+  <path d="M256.0 207.6A48.4 48.4 0 0 1 302.0 270.9" fill="none" stroke="#22d3ee" stroke-width="5" stroke-linecap="round"/>
+</svg>
