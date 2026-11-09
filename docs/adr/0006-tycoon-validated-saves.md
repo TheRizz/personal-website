@@ -48,6 +48,9 @@ stored state is reachable by a legitimate player.
   `RULES_VERSION`, and the server refuses older versions.
 - Replay cost is linear in the log; logs are capped (entries and bytes) and a 5-minute log
   replays in well under a millisecond.
-- A crash loses at most the unsaved minutes (≤ 5).
+- A crash loses at most the unsaved minutes (≤ 5). Since 2026-11 the web page keeps that log in
+  localStorage and sends it with the next session start, which replays it only if nothing has
+  happened to the save since (docs/04-pipeline-tycoon.md §2.3, "Unsaved play"), so a killed tab
+  usually loses nothing.
 - Anonymous players are a bearer token in localStorage: clearing storage without linking a device
   loses the save (accepted).

@@ -3,7 +3,7 @@
 // time and randomness from this side.
 //
 //   POST /api/tycoon/players   new anonymous player → { player, token }    (rate-limited per IP)
-//   POST /api/tycoon/session   start a session: offline earnings, seed      (supersedes the last)
+//   POST /api/tycoon/session   start a session: unsaved play, offline time, seed (supersedes)
 //   PUT  /api/tycoon/save      replay the log since the last save
 //   POST /api/tycoon/pair      a 6-character code another device can claim (10 min, single use)
 //   POST /api/tycoon/pair/claim  claim a code → { player, token } for this device (rate-limited)
@@ -30,6 +30,8 @@ import {
   sessionRequestSchema,
   upgradeState,
   type GameState,
+  type SaveLog,
+  type Undone,
 } from "@site/tycoon-core";
 import { jsonError, methodNotAllowed, rateLimitKey } from "./api";
 
@@ -104,17 +106,21 @@ async function readJson(request: Request): Promise<{ body: unknown } | Response>
   }
 }
 
+function readPlayer(env: TycoonEnv, id: string): Promise<PlayerRow | null> {
+  return env.TYCOON_DB.prepare(
+    "SELECT id, token_hash, state, rules_version, state_at, session, seq FROM players WHERE id = ?",
+  )
+    .bind(id)
+    .first<PlayerRow>();
+}
+
 /** The player for a valid `Authorization` header (first secret or a linked device's), or the error. */
 async function authenticate(request: Request, env: TycoonEnv): Promise<Authenticated | Response> {
   const header = request.headers.get("Authorization") ?? "";
   const [id = "", token = ""] = header.replace(/^Bearer\s+/i, "").split(".");
   const unauthorized = jsonError(401, "unauthorized", "Unknown player.");
   if (!PLAYER_ID.test(id) || !TOKEN.test(token)) return unauthorized;
-  const row = await env.TYCOON_DB.prepare(
-    "SELECT id, token_hash, state, rules_version, state_at, session, seq FROM players WHERE id = ?",
-  )
-    .bind(id)
-    .first<PlayerRow>();
+  const row = await readPlayer(env, id);
   if (!row) return unauthorized;
   const tokenHash = await sha256Hex(token);
   if (sameHash(row.token_hash, tokenHash)) return { row, tokenHash };
@@ -157,28 +163,69 @@ async function startSession(request: Request, env: TycoonEnv, now: number): Prom
   if (body.data.v !== RULES_VERSION) return upgradeRequired();
   const auth = await authenticate(request, env);
   if (auth instanceof Response) return auth;
-  const { row } = auth;
+  let { row } = auth;
+  let unsaved = body.data.unsaved;
 
-  // Offline earnings, by our clock and capped (rules.ts OFFLINE_CAP_MS).
-  const offline = applyOffline(storedState(row), now - row.state_at);
-  const state = offline.state;
-  state.golden = { seed: newGoldenSeed(), start: state.playMs, next: 0 };
-  const session = crypto.randomUUID();
-  await env.TYCOON_DB.prepare(
-    `UPDATE players SET state = ?, rules_version = ?, state_at = ?, session = ?, updated_at = ?
-     WHERE id = ?`,
-  )
-    .bind(JSON.stringify(state), RULES_VERSION, now, session, now, row.id)
-    .run();
-  return Response.json(
-    {
-      state,
-      session,
-      seq: row.seq,
-      offline: { ms: offline.creditedMs, earned: offline.earned },
-    },
-    { headers: noStore },
-  );
+  // Two tries: if a save lands between our read and write (another tab of the same session), the
+  // second try reads again and leaves the unsaved play out.
+  for (let attempt = 0; ; attempt++) {
+    let state = storedState(row);
+    let awayMs = now - row.state_at;
+    let seq = row.seq;
+    let recovered: { moves: number; undone: Undone[] } | undefined;
+    // Play the last tab never saved, only if it is still the newest thing to happen to this
+    // player: same session (nobody started one since) and same save counter (no save since). It
+    // is replayed like a save, with the time credited coming out of the offline time, so the same
+    // minutes are never counted twice.
+    if (unsaved && unsaved.session === row.session && unsaved.seq === row.seq) {
+      const result = replay(state, unsaved.log, awayMs + SAVE_SLACK_MS);
+      state = result.state;
+      awayMs = Math.max(0, awayMs - result.creditedMs);
+      seq += 1;
+      const undone = summariseDropped(unsaved.log, result.dropped);
+      recovered = { moves: countMoves(unsaved.log) - countUndone(undone), undone };
+    }
+
+    // Offline earnings, by our clock and capped (rules.ts OFFLINE_CAP_MS).
+    const offline = applyOffline(state, awayMs);
+    state = offline.state;
+    state.golden = { seed: newGoldenSeed(), start: state.playMs, next: 0 };
+    const session = crypto.randomUUID();
+    const written = await env.TYCOON_DB.prepare(
+      `UPDATE players SET state = ?, rules_version = ?, state_at = ?, session = ?, seq = ?,
+       updated_at = ? WHERE id = ? AND seq = ?`,
+    )
+      .bind(JSON.stringify(state), RULES_VERSION, now, session, seq, now, row.id, row.seq)
+      .run();
+    if (written.meta.changes !== 1) {
+      const again = await readPlayer(env, row.id);
+      if (!again || attempt > 0) {
+        return jsonError(409, "out_of_sync", "Your save changed meanwhile. Reload to continue.");
+      }
+      row = again;
+      unsaved = undefined;
+      continue;
+    }
+    return Response.json(
+      {
+        state,
+        session,
+        seq,
+        offline: { ms: offline.creditedMs, earned: offline.earned },
+        ...(recovered ? { recovered } : {}),
+      },
+      { headers: noStore },
+    );
+  }
+}
+
+/** Clicks count one each, everything else one per action. */
+function countMoves(log: SaveLog): number {
+  return log.actions.reduce((sum, action) => sum + (action.a === "click" ? action.n : 1), 0);
+}
+
+function countUndone(undone: Undone[]): number {
+  return undone.reduce((sum, group) => sum + group.count, 0);
 }
 
 async function save(request: Request, env: TycoonEnv, now: number): Promise<Response> {

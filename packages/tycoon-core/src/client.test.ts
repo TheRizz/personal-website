@@ -3,13 +3,14 @@ import {
   TycoonApiError,
   TycoonController,
   TycoonClient,
+  readUnsaved,
   type SaveAck,
   type SessionStart,
   type Transport,
 } from "./client";
 import { applyOffline, replay, type SaveLog } from "./replay";
-import { cloneState, newGame, type GameState } from "./rules";
-import { AUTOSAVE_MS } from "./schema";
+import { RULES_VERSION, cloneState, newGame, type GameState } from "./rules";
+import { AUTOSAVE_MS, type UnsavedPlay } from "./schema";
 
 /**
  * A server in memory: replays each log like the Worker does, with a clock the test moves, and
@@ -25,10 +26,27 @@ function fakeServer(start: GameState = newGame(), clock: () => number = () => 0)
   let savedAt = clock();
   let sessions = 0;
   let hold: Promise<void> | null = null;
+  let refuseNextStart = false;
   const transport: Transport = {
-    async startSession(): Promise<SessionStart> {
+    async startSession(unsaved?: UnsavedPlay): Promise<SessionStart> {
+      if (refuseNextStart && unsaved) {
+        refuseNextStart = false;
+        throw new TycoonApiError({ kind: "network", detail: "HTTP 400" });
+      }
+      // Like the Worker: unsaved play from the current session and seq goes in first.
+      let awayMs = clock() - savedAt;
+      let recovered: SessionStart["recovered"];
+      if (unsaved && unsaved.session === `s${sessions}` && unsaved.seq === seq) {
+        const result = replay(state, unsaved.log, awayMs + 5_000);
+        state = result.state;
+        awayMs = Math.max(0, awayMs - result.creditedMs);
+        seq += 1;
+        logs.push(unsaved.log);
+        const moves = unsaved.log.actions.reduce((n, a) => n + (a.a === "click" ? a.n : 1), 0);
+        recovered = { moves, undone: [] };
+      }
       sessions += 1;
-      const offline = applyOffline(state, clock() - savedAt);
+      const offline = applyOffline(state, awayMs);
       state = offline.state;
       savedAt = clock();
       return {
@@ -36,6 +54,7 @@ function fakeServer(start: GameState = newGame(), clock: () => number = () => 0)
         session: `s${sessions}`,
         seq,
         offline: { ms: offline.creditedMs, earned: offline.earned },
+        ...(recovered ? { recovered } : {}),
       };
     },
     async uploadSave(_session, clientSeq, log): Promise<SaveAck> {
@@ -87,6 +106,10 @@ function fakeServer(start: GameState = newGame(), clock: () => number = () => 0)
     },
     failWith(error: TycoonApiError) {
       failNext = error;
+    },
+    /** The next session start that carries unsaved play is refused (400). */
+    refuseNextStart() {
+      refuseNextStart = true;
     },
     holdSaves() {
       let release!: () => void;
@@ -403,5 +426,169 @@ describe("TycoonClient", () => {
     await expect(c.claimPairingCode("NOPE00")).rejects.toMatchObject({
       failure: { kind: "invalid_code" },
     });
+  });
+});
+
+describe("unsaved play (a tab killed between saves)", () => {
+  /** A server, a localStorage stand-in, and tabs that come and go on one device. */
+  function device() {
+    let now = 0;
+    let wall = 1_000_000;
+    let stored: string | null = null;
+    const start = producing();
+    start.records = 1e6;
+    const server = fakeServer(start, () => wall);
+    const store = { load: () => stored, save: (v: string | null) => (stored = v) };
+    let tab: TycoonController | null = null;
+    const open = async () => {
+      tab = new TycoonController(
+        server.transport,
+        () => now,
+        () => wall,
+        store,
+      );
+      await tab.start();
+      return tab;
+    };
+    return {
+      server,
+      open,
+      stored: () => stored,
+      setStored: (v: string | null) => (stored = v),
+      advance(ms: number) {
+        now += ms;
+        wall += ms;
+        tab?.tick();
+      },
+      /** The tab dies without a word (iOS memory pressure): no pagehide, no save. */
+      kill() {
+        tab = null;
+      },
+      away(ms: number) {
+        now += ms;
+        wall += ms;
+      },
+    };
+  }
+
+  it("sends the play a killed tab never saved with the next visit", async () => {
+    const d = device();
+    const tab = await d.open();
+    for (let i = 0; i < 40; i++) {
+      d.advance(100);
+      tab.click();
+    }
+    expect(tab.buy(0, 1).ok).toBe(true);
+    d.advance(2_000);
+    expect(d.stored()).not.toBeNull();
+    d.kill();
+    d.away(60_000);
+
+    const events: string[] = [];
+    const next = new TycoonController(
+      d.server.transport,
+      () => 0,
+      () => 0,
+      {
+        load: d.stored,
+        save: d.setStored,
+      },
+    );
+    next.onEvent((e) => e.type === "recovered" && events.push(`${e.moves}`));
+    await next.start();
+    expect(d.server.state.clicks).toBe(40);
+    expect(d.server.state.owned[0]).toBe(11);
+    expect(next.local!.owned[0]).toBe(11);
+    expect(events).toEqual(["41"]);
+    // Taken: nothing left to send again.
+    expect(d.stored()).toBeNull();
+  });
+
+  it("counts the time once: replayed play plus offline adds up to the time away", async () => {
+    const d = device();
+    const tab = await d.open();
+    const before = d.server.state.playMs;
+    d.advance(1_000);
+    tab.click();
+    d.advance(30_000);
+    d.kill();
+    d.away(600_000);
+    await d.open();
+    // At most the 5 s of slack the server allows a save.
+    expect(d.server.state.playMs - before).toBeGreaterThanOrEqual(631_000 - 1);
+    expect(d.server.state.playMs - before).toBeLessThanOrEqual(631_000 + 5_000);
+  });
+
+  it("clears what it kept once a save lands, so it is never counted twice", async () => {
+    const d = device();
+    const tab = await d.open();
+    d.advance(100);
+    tab.click();
+    d.advance(2_000);
+    expect(d.stored()).not.toBeNull();
+    await tab.save();
+    expect(d.stored()).toBeNull();
+    d.kill();
+    await d.open();
+    expect(d.server.state.clicks).toBe(1);
+  });
+
+  it("keeps a save's play until the server confirms it", async () => {
+    const d = device();
+    const tab = await d.open();
+    d.advance(100);
+    tab.click();
+    const release = d.server.holdSaves();
+    const saving = tab.save(true);
+    d.advance(500);
+    tab.click();
+    d.advance(2_000);
+    // Both clicks are kept while the save is in flight, from the last confirmed save.
+    const kept = readUnsaved(d.stored());
+    expect(kept?.seq).toBe(0);
+    expect(kept?.log.actions.reduce((n, a) => n + (a.a === "click" ? a.n : 0), 0)).toBe(2);
+    release();
+    await saving;
+    // After it lands only the second click is left, under the new seq.
+    const after = readUnsaved(d.stored());
+    expect(after?.seq).toBe(1);
+    expect(after?.log.actions).toHaveLength(1);
+  });
+
+  it("ignores what it kept when the save sent on the way out landed after all", async () => {
+    const d = device();
+    const tab = await d.open();
+    d.advance(100);
+    tab.click();
+    d.server.loseNextReply();
+    await tab.save(true);
+    // The page never heard back, so it still keeps the click…
+    expect(d.stored()).not.toBeNull();
+    d.kill();
+    await d.open();
+    // …but the server has it once.
+    expect(d.server.state.clicks).toBe(1);
+  });
+
+  it("forgets play the server refuses outright and starts anyway", async () => {
+    const d = device();
+    const tab = await d.open();
+    d.advance(100);
+    tab.click();
+    d.advance(2_000);
+    d.kill();
+    d.server.refuseNextStart();
+    const next = await d.open();
+    expect(next.status.kind).toBe("playing");
+    expect(d.stored()).toBeNull();
+  });
+
+  it("reads only well-formed play from these rules", () => {
+    const play = { session: "s1", seq: 0, log: { elapsed: 10, actions: [] } };
+    expect(readUnsaved(JSON.stringify({ v: RULES_VERSION, ...play }))).toEqual(play);
+    expect(readUnsaved(JSON.stringify({ v: RULES_VERSION - 1, ...play }))).toBeNull();
+    expect(readUnsaved("{nope")).toBeNull();
+    expect(readUnsaved(JSON.stringify({ v: RULES_VERSION, seq: 0 }))).toBeNull();
+    expect(readUnsaved(null)).toBeNull();
   });
 });

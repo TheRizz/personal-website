@@ -68,6 +68,7 @@ export function playEvent(event: GameEvent) {
       [262, 330, 392, 523, 659, 784].forEach((f, i) => tone(f, 0.4, "triangle", 0.05, 1, i * 0.15));
       break;
     case "dropped":
+    case "recovered":
       break;
   }
 }

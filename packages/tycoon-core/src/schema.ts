@@ -37,8 +37,23 @@ export const saveLogSchema: z.ZodType<SaveLog> = z.object({
   actions: z.array(actionSchema).max(MAX_LOG_ACTIONS),
 });
 
+/**
+ * Play a tab never got to save (it was closed or killed before its next save): the log since its
+ * last save, with the session and save counter it had. Sent with the next session start, which
+ * replays it first if nothing has saved or started a session since (ADR-0006, "Unsaved play").
+ */
+export const unsavedPlaySchema = z.object({
+  session: z.string().min(1).max(64),
+  seq: z.number().int().min(0),
+  log: saveLogSchema,
+});
+export type UnsavedPlay = z.infer<typeof unsavedPlaySchema>;
+
 /** POST /api/tycoon/session body. */
-export const sessionRequestSchema = z.object({ v: z.number().int() });
+export const sessionRequestSchema = z.object({
+  v: z.number().int(),
+  unsaved: unsavedPlaySchema.optional(),
+});
 
 /** PUT /api/tycoon/save body. */
 export const saveRequestSchema = z.object({

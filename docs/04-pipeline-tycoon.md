@@ -62,12 +62,21 @@ relative to the last save — and the server **replays** it from the last state 
 | When | Request |
 | --- | --- |
 | First visit | `POST /api/tycoon/players` → anonymous player id + secret token (kept in localStorage). Rate-limited per IP (20 a minute, enough for a shared office network). |
-| Each page load | `POST /api/tycoon/session` → canonical state with offline earnings applied, a new session id and golden-packet seed. Starting a session ends any other open session (newest wins). |
+| Each page load | `POST /api/tycoon/session` → canonical state with offline earnings applied, a new session id and golden-packet seed. Starting a session ends any other open session (newest wins). Carries the play a killed tab never saved, if any (below). |
 | Every 5 min, on tab close (`keepalive`), before a migration, at the ending | `PUT /api/tycoon/save` with the log since the last save. |
 | Linking (rare) | `POST /api/tycoon/pair` → a code; `POST /api/tycoon/pair/claim` → a secret for the new device; `DELETE /api/tycoon/device` to unlink (§3.1). |
 
 About 12 requests per hour of active play, none per click. A save from a superseded session gets
 `409 session_replaced` and the page asks you to reload.
+
+**Unsaved play.** Between saves the page keeps its log since the last confirmed save in
+localStorage (`games.tycoon.unsaved`, written at most every 2 s and before every save, cleared when
+a save lands), with the session id and save counter it belongs to. A tab iOS kills without a
+`pagehide` would otherwise lose up to 5 minutes. The next page load sends it with the session
+start, and the server replays it first, like a save, only if the session and save counter still
+match (nothing saved and no other device started since); otherwise it is ignored. The time it
+credits comes out of the offline time, so no minute counts twice. The page then says "Picked up
+N moves you made before the page closed."
 
 ### 2.4 Storage
 

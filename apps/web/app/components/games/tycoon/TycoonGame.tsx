@@ -14,6 +14,7 @@ import {
   currentRate,
   formatDuration,
   formatLong,
+  describeRecovered,
   describeUndone,
   generatorCost,
   maxAffordable,
@@ -31,7 +32,7 @@ import {
   type Status,
 } from "@site/tycoon-core";
 import { primaryButton, secondaryButton } from "~/components/games/ui";
-import { tycoonClient } from "~/lib/games/tycoon/api";
+import { tycoonClient, unsavedStore } from "~/lib/games/tycoon/api";
 import { TIER_HEX } from "./colours";
 import {
   HINTS,
@@ -91,7 +92,15 @@ function waitLabel(state: GameState, cost: number): string | null {
 }
 
 export function TycoonGame() {
-  const [controller] = useState(() => new TycoonController(tycoonClient));
+  const [controller] = useState(
+    () =>
+      new TycoonController(
+        tycoonClient,
+        () => performance.now(),
+        () => Date.now(),
+        unsavedStore,
+      ),
+  );
   useSyncExternalStore(controller.subscribe, controller.getVersion, controller.getVersion);
   const sceneRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>("generators");
@@ -166,6 +175,7 @@ export function TycoonGame() {
         showToast(`Achievement: ${names.join(", ")} (+1 %)`);
       }
       if (event.type === "dropped") showToast(describeUndone(event.undone));
+      if (event.type === "recovered") showToast(describeRecovered(event.moves));
       if (event.type === "ending") setEnding(true);
     });
     return off;
