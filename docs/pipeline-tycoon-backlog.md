@@ -50,7 +50,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-09 (in PR): unsaved-play safety net. Between saves the page keeps what you played in
+- 2026-11-09 (in [PR #54](https://github.com/TheRizz/personal-website/pull/54)): unsaved-play safety net. Between saves the page keeps what you played in
   this browser, so a tab the phone closes on its own (iOS under memory pressure, with no chance
   to save) no longer loses up to 5 minutes: the next visit sends it along and the server adds it
   first, if nothing has saved or started elsewhere since, and says "Picked up N moves you made
@@ -120,7 +120,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-10-30: golden packet you can't miss (scheduled run, [PR #45](https://github.com/TheRizz/personal-website/pull/45)).
 - 2026-11-04: PR #45 merged; keyboard help (scheduled run, [PR #48](https://github.com/TheRizz/personal-website/pull/48)).
 - 2026-11-04: PR #48 merged; install on the home screen (scheduled run, [PR #51](https://github.com/TheRizz/personal-website/pull/51)).
-- 2026-11-09: PR #51 merged; unsaved-play safety net (scheduled run, PR).
+- 2026-11-09: PR #51 merged; unsaved-play safety net (scheduled run, [PR #54](https://github.com/TheRizz/personal-website/pull/54)).
 
 ## How the scheduled runs work
 
