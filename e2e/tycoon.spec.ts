@@ -308,13 +308,16 @@ test("play a killed tab never saved comes back on the next visit", async ({ page
       String(input).includes("/api/tycoon/save") ? new Promise(() => {}) : send(input, init);
   });
   const errors = watchErrors(page, [/Failed to fetch manifest patches/]);
-  const session = page.waitForRequest((r) => r.url().endsWith("/api/tycoon/session"));
+  const session = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/session"));
   await page.reload();
-  await play(page);
-  expect((await session).postDataJSON().unsaved.log.actions.length).toBeGreaterThan(1);
+  const started = await session;
+  expect(started.request().postDataJSON().unsaved.log.actions.length).toBeGreaterThan(1);
+  expect((await started.json()).recovered.moves).toBeGreaterThan(1);
+  // The notice shows as soon as the game starts, before the scene has finished loading.
   await expect(
     page.getByText(/^Picked up \d+ moves you made before the page closed\.$/),
   ).toBeVisible();
+  await play(page);
   await expect(page.getByRole("button", { name: /Intern/ })).toContainText(/Intern\s*1/);
   await expect
     .poll(() => page.evaluate(() => localStorage.getItem("games.tycoon.unsaved")))
