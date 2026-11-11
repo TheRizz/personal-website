@@ -47,7 +47,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-11 (in PR): performance pass. A late game (every tier owned, overclocked, the core
+- 2026-11-11 (in [PR #55](https://github.com/TheRizz/personal-website/pull/55)): performance pass. A late game (every tier owned, overclocked, the core
   tapped fast) on a phone-speed CPU went from about 23 to about 56 frames a second, the same as
   an empty factory. Packets are now sprites from one small texture instead of circles Phaser
   re-cut into triangles every frame; the scene's other circles use as many corners as their
@@ -124,7 +124,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-11-04: PR #45 merged; keyboard help (scheduled run, [PR #48](https://github.com/TheRizz/personal-website/pull/48)).
 - 2026-11-04: PR #48 merged; install on the home screen (scheduled run, [PR #51](https://github.com/TheRizz/personal-website/pull/51)).
 - 2026-11-09: PR #51 merged; unsaved-play safety net (scheduled run, [PR #54](https://github.com/TheRizz/personal-website/pull/54)).
-- 2026-11-11: PR #54 merged; performance pass (scheduled run, PR link below once open).
+- 2026-11-11: PR #54 merged; performance pass (scheduled run, [PR #55](https://github.com/TheRizz/personal-website/pull/55)).
 
 ## How the scheduled runs work
 
