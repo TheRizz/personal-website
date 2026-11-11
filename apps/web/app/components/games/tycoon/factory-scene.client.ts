@@ -22,6 +22,16 @@ import {
   trailPulse,
 } from "./golden-visual";
 import type { TycoonSettings } from "./settings";
+import {
+  BURST_CAP,
+  FLOAT_CAP,
+  circlePoints,
+  PACKET_CAP,
+  packetsPerSecond,
+  pickSlot,
+  spawnPackets,
+  tierCap,
+} from "./scene-budget";
 import { playGoldenChime } from "./sound";
 
 // The live "factory": a dark neon schematic drawn in code (no image assets, so the CSP needs no
@@ -36,12 +46,34 @@ const BG = 0x07090c;
 const GRID = 0x0f1720;
 /** Fingers the core answers at once (two thumbs, with room for a stray one). */
 const TOUCH_POINTERS = 4;
+/** One packet's look (a soft glow round a bright dot), drawn once and tinted per tier. */
+const PACKET_TEXTURE = "tycoon-packet";
+const PACKET_SIZE = 12;
+
+// fillPoints and strokePoints only read x and y, though their types ask for Vector2s.
+const corners = (x: number, y: number, radius: number) =>
+  circlePoints(x, y, radius) as unknown as Phaser.Math.Vector2[];
+
+/** Circles with as many corners as their size needs (Phaser's own always use 100). */
+function fillCircle(g: Phaser.GameObjects.Graphics, x: number, y: number, radius: number) {
+  if (radius > 0) g.fillPoints(corners(x, y, radius), true);
+}
+
+function strokeCircle(g: Phaser.GameObjects.Graphics, x: number, y: number, radius: number) {
+  if (radius > 0) g.strokePoints(corners(x, y, radius), true, true);
+}
 
 interface Packet {
   tier: number;
   /** 0 at the node, 1 at the core. */
   progress: number;
   speed: number;
+}
+
+interface Float {
+  text: Phaser.GameObjects.Text;
+  /** When it appeared (scene time), or null while it's free. */
+  born: number | null;
 }
 
 interface Burst {
@@ -62,7 +94,18 @@ class FactoryScene extends Phaser.Scene {
   private settings!: () => TycoonSettings;
   private onGolden: GoldenNotice = () => {};
   private goldenWatch = new GoldenWatch();
+  /** The grid, redrawn only when the scene changes size. */
+  private grid!: Phaser.GameObjects.Graphics;
+  private gridSize = "";
+  /** Links and nodes, under the packets. */
   private graphics!: Phaser.GameObjects.Graphics;
+  /** The core, rings and golden packet, over the packets. */
+  private front!: Phaser.GameObjects.Graphics;
+  /** Packet sprites, PACKET_CAP of them made once; the first `packets.length` are shown. */
+  private sprites: Phaser.GameObjects.Image[] = [];
+  private shown = 0;
+  private floats: Float[] = [];
+  private reportAt = 0;
   private labels: Phaser.GameObjects.Text[] = [];
   private coreLabel!: Phaser.GameObjects.Text;
   private packets: Packet[] = [];
@@ -91,7 +134,26 @@ class FactoryScene extends Phaser.Scene {
   }
 
   create() {
+    this.grid = this.add.graphics();
     this.graphics = this.add.graphics();
+    if (!this.textures.exists(PACKET_TEXTURE)) {
+      const texture = this.textures.createCanvas(PACKET_TEXTURE, PACKET_SIZE, PACKET_SIZE)!;
+      const context = texture.getContext();
+      const middle = PACKET_SIZE / 2;
+      context.fillStyle = "rgba(255, 255, 255, 0.25)";
+      context.beginPath();
+      context.arc(middle, middle, 5, 0, Math.PI * 2);
+      context.fill();
+      context.fillStyle = "#ffffff";
+      context.beginPath();
+      context.arc(middle, middle, 2, 0, Math.PI * 2);
+      context.fill();
+      texture.refresh();
+    }
+    this.sprites = Array.from({ length: PACKET_CAP }, () =>
+      this.add.image(0, 0, PACKET_TEXTURE).setVisible(false),
+    );
+    this.front = this.add.graphics();
     // Text renders at the screen's pixel density, so it stays crisp on phones.
     const mono = {
       fontFamily: "JetBrains Mono, ui-monospace, monospace",
@@ -107,6 +169,13 @@ class FactoryScene extends Phaser.Scene {
     this.coreLabel = this.add
       .text(0, 0, "", { ...mono, fontSize: "12px", color: "#a5f3fc", align: "center" })
       .setOrigin(0.5, 0);
+    this.floats = Array.from({ length: FLOAT_CAP }, () => ({
+      text: this.add
+        .text(0, 0, "", { ...mono, fontSize: "14px" })
+        .setOrigin(0.5)
+        .setVisible(false),
+      born: null,
+    }));
 
     this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => this.handlePointer(pointer));
     this.unsubscribe = this.controller.onEvent((event) => this.handleEvent(event));
@@ -161,11 +230,11 @@ class FactoryScene extends Phaser.Scene {
       case "buy": {
         if (this.settings().reduceMotion) break;
         const node = nodes[event.tier];
-        if (node) this.bursts.push({ ...node, age: 0, colour: TIER_COLOURS[event.tier] ?? CORE });
+        if (node) this.addBurst({ ...node, age: 0, colour: TIER_COLOURS[event.tier] ?? CORE });
         break;
       }
       case "golden": {
-        if (!this.settings().reduceMotion) this.bursts.push({ x: cx, y: cy, age: 0, colour: GOLD });
+        if (!this.settings().reduceMotion) this.addBurst({ x: cx, y: cy, age: 0, colour: GOLD });
         this.floatText(
           cx,
           cy - coreRadius - 24,
@@ -177,7 +246,7 @@ class FactoryScene extends Phaser.Scene {
       case "migrate":
         this.packets = [];
         if (!this.settings().reduceMotion) {
-          this.bursts.push({ x: cx, y: cy, age: 0, colour: 0xffffff });
+          this.addBurst({ x: cx, y: cy, age: 0, colour: 0xffffff });
         }
         break;
       default:
@@ -185,15 +254,22 @@ class FactoryScene extends Phaser.Scene {
     }
   }
 
+  /** A ring, dropping the oldest when BURST_CAP are already showing. */
+  private addBurst(burst: Burst) {
+    if (this.bursts.length >= BURST_CAP) this.bursts.shift();
+    this.bursts.push(burst);
+  }
+
+  /** A number that floats up and fades, reusing the oldest when FLOAT_CAP are showing. */
   private floatText(x: number, y: number, text: string, color: string) {
-    const label = this.add
-      .text(x, y, text, {
-        fontFamily: "JetBrains Mono, ui-monospace, monospace",
-        fontSize: "14px",
-        resolution: Math.min(3, window.devicePixelRatio || 1),
-        color,
-      })
-      .setOrigin(0.5);
+    const now = this.time.now;
+    const slot =
+      this.floats[pickSlot(this.floats.map((f) => (f.born === null ? null : now - f.born)))];
+    if (!slot) return;
+    const label = slot.text;
+    this.tweens.killTweensOf(label);
+    slot.born = now;
+    label.setText(text).setColor(color).setPosition(x, y).setAlpha(1).setVisible(true);
     // With reduced motion the number fades where it appeared instead of rising.
     const still = this.settings().reduceMotion;
     this.tweens.add({
@@ -202,32 +278,65 @@ class FactoryScene extends Phaser.Scene {
       alpha: 0,
       duration: 900,
       ease: "Cubic.easeOut",
-      onComplete: () => label.destroy(),
+      onComplete: () => {
+        label.setVisible(false);
+        slot.born = null;
+      },
     });
+  }
+
+  /** Shows the first `count` packet sprites and hides the rest that were showing. */
+  private showSprites(count: number) {
+    for (let i = count; i < this.shown; i++) this.sprites[i]!.setVisible(false);
+    this.shown = count;
+  }
+
+  /** Drawn counts on the canvas, a few times a second, for the browser tests. */
+  private report() {
+    if (this.time.now < this.reportAt) return;
+    this.reportAt = this.time.now + 500;
+    const canvas = this.game.canvas;
+    canvas.dataset.packets = String(this.packets.length);
+    canvas.dataset.floats = String(this.floats.filter((f) => f.born !== null).length);
+    canvas.dataset.bursts = String(this.bursts.length);
   }
 
   update(_time: number, delta: number) {
     this.controller.tick();
     const state = this.controller.local;
     const g = this.graphics;
+    const front = this.front;
     g.clear();
+    front.clear();
     const layout = this.layout();
     const { width, height, top, area, cx, cy, coreRadius, nodes } = layout;
     const dt = Math.min(delta, 100) / 1000;
     const still = this.settings().reduceMotion;
 
-    // Background grid.
-    g.fillStyle(BG, 1);
-    g.fillRect(0, 0, width, height);
-    g.lineStyle(1, GRID, 1);
-    for (let x = (cx % 32) - 32; x < width; x += 32) g.lineBetween(x, 0, x, height);
-    for (let y = (cy % 32) - 32; y < height; y += 32) g.lineBetween(0, y, width, y);
-    if (!state) return;
+    // Background grid, only when the size changed.
+    const size = `${width}x${height}`;
+    if (size !== this.gridSize) {
+      this.gridSize = size;
+      const grid = this.grid;
+      grid.clear();
+      grid.fillStyle(BG, 1);
+      grid.fillRect(0, 0, width, height);
+      grid.lineStyle(1, GRID, 1);
+      for (let x = (cx % 32) - 32; x < width; x += 32) grid.lineBetween(x, 0, x, height);
+      for (let y = (cy % 32) - 32; y < height; y += 32) grid.lineBetween(0, y, width, y);
+    }
+    if (!state) {
+      this.showSprites(0);
+      return;
+    }
 
     const boosted = overclocked(state);
     const coreColour = boosted ? OVERCLOCK : CORE;
 
-    // Links and nodes for every tier owned.
+    // Links and nodes for every tier owned. Each tier may hold its share of the packet cap.
+    const live = GENERATORS.map(() => 0);
+    for (const packet of this.packets) live[packet.tier] = (live[packet.tier] ?? 0) + 1;
+    const share = tierCap(state.owned.filter((count) => count > 0).length);
     nodes.forEach((node, tier) => {
       const owned = state.owned[tier] ?? 0;
       const label = this.labels[tier]!;
@@ -243,63 +352,63 @@ class FactoryScene extends Phaser.Scene {
       g.lineBetween(node.x, node.y, cx, cy);
       const radius = nodeRadius(layout, owned);
       g.fillStyle(colour, 0.12);
-      g.fillCircle(node.x, node.y, radius * 1.33);
+      fillCircle(g, node.x, node.y, radius * 1.33);
       g.fillStyle(BG, 1);
-      g.fillCircle(node.x, node.y, radius);
+      fillCircle(g, node.x, node.y, radius);
       g.lineStyle(2, colour, 0.95);
-      g.strokeCircle(node.x, node.y, radius);
+      strokeCircle(g, node.x, node.y, radius);
       const place = labelPlacement(layout, tier, radius);
       label.setText(`${LABELS[tier]}\n×${owned}`);
       label.setOrigin(place.origin.x, place.origin.y);
       label.setPosition(place.x, place.y);
       label.setAlpha(Math.min(1, label.alpha + dt * 2));
 
-      // Packets per second grow with the log of production, so the screen stays readable.
-      const rate = tierRate(state, tier) * (boosted ? 7 : 1);
-      const perSecond = Math.min(14, 0.6 + Math.log10(rate + 1) * 1.4);
-      this.spawnDebt[tier] = (this.spawnDebt[tier] ?? 0) + perSecond * dt;
-      while ((this.spawnDebt[tier] ?? 0) >= 1 && this.packets.length < 400) {
-        this.spawnDebt[tier]! -= 1;
+      const perSecond = packetsPerSecond(tierRate(state, tier), boosted);
+      const step = spawnPackets(this.spawnDebt[tier] ?? 0, perSecond, dt, live[tier] ?? 0, share);
+      this.spawnDebt[tier] = step.debt;
+      for (let i = 0; i < step.spawn; i++) {
         this.packets.push({ tier, progress: 0, speed: 0.45 + Math.random() * 0.35 });
       }
     });
 
-    // Packets travelling into the core.
+    // Packets travelling into the core: sprites from one texture, drawn in one batch.
     this.packets = this.packets.filter((packet) => {
       packet.progress += packet.speed * dt * (boosted ? 1.8 : 1);
-      if (packet.progress >= 1) return false;
-      const node = nodes[packet.tier]!;
-      const x = node.x + (cx - node.x) * packet.progress;
-      const y = node.y + (cy - node.y) * packet.progress;
-      const colour = TIER_COLOURS[packet.tier] ?? CORE;
-      g.fillStyle(colour, 0.25);
-      g.fillCircle(x, y, 5);
-      g.fillStyle(colour, 1);
-      g.fillCircle(x, y, 2);
-      return true;
+      return packet.progress < 1;
     });
+    this.packets.forEach((packet, index) => {
+      const node = nodes[packet.tier]!;
+      this.sprites[index]
+        ?.setPosition(
+          node.x + (cx - node.x) * packet.progress,
+          node.y + (cy - node.y) * packet.progress,
+        )
+        .setTint(TIER_COLOURS[packet.tier] ?? CORE)
+        .setVisible(true);
+    });
+    this.showSprites(Math.min(this.packets.length, this.sprites.length));
 
     // The core: the big click target.
     this.corePulse = still ? 0 : Math.max(0, this.corePulse - dt * 4);
     const pulse = still
       ? coreRadius
       : coreRadius * (1 + this.corePulse * 0.12 + Math.sin(this.time.now / 400) * 0.02);
-    g.fillStyle(coreColour, 0.06);
-    g.fillCircle(cx, cy, pulse * 1.9);
-    g.fillStyle(coreColour, 0.12);
-    g.fillCircle(cx, cy, pulse * 1.35);
-    g.fillStyle(BG, 1);
-    g.fillCircle(cx, cy, pulse);
-    g.lineStyle(3, coreColour, 1);
-    g.strokeCircle(cx, cy, pulse);
-    g.lineStyle(1, coreColour, 0.5);
-    g.strokeCircle(cx, cy, pulse * 0.62);
+    front.fillStyle(coreColour, 0.06);
+    fillCircle(front, cx, cy, pulse * 1.9);
+    front.fillStyle(coreColour, 0.12);
+    fillCircle(front, cx, cy, pulse * 1.35);
+    front.fillStyle(BG, 1);
+    fillCircle(front, cx, cy, pulse);
+    front.lineStyle(3, coreColour, 1);
+    strokeCircle(front, cx, cy, pulse);
+    front.lineStyle(1, coreColour, 0.5);
+    strokeCircle(front, cx, cy, pulse * 0.62);
     // A little rotating "processing" arc.
     const spin = still ? -Math.PI / 2 : this.time.now / 600;
-    g.lineStyle(2, coreColour, 0.9);
-    g.beginPath();
-    g.arc(cx, cy, pulse * 0.62, spin, spin + Math.PI * 0.6);
-    g.strokePath();
+    front.lineStyle(2, coreColour, 0.9);
+    front.beginPath();
+    front.arc(cx, cy, pulse * 0.62, spin, spin + Math.PI * 0.6);
+    front.strokePath();
     this.coreLabel.setText(`PROCESS\n+${this.format(clickValue(state))}`);
     const coreFont = coreRadius < 52 ? 10 : 12;
     if (coreFont !== this.coreFont) this.coreLabel.setFontSize((this.coreFont = coreFont));
@@ -311,10 +420,11 @@ class FactoryScene extends Phaser.Scene {
     this.bursts = this.bursts.filter((burst) => {
       burst.age += dt;
       if (burst.age > 0.6) return false;
-      g.lineStyle(2, burst.colour, 1 - burst.age / 0.6);
-      g.strokeCircle(burst.x, burst.y, 12 + burst.age * 90);
+      front.lineStyle(2, burst.colour, 1 - burst.age / 0.6);
+      strokeCircle(front, burst.x, burst.y, 12 + burst.age * 90);
       return true;
     });
+    this.report();
 
     // The golden packet, while it's on screen: a pulsing trail behind it, a ring that empties as
     // its time runs out, and a soft chime and a spoken line when it arrives.
@@ -331,22 +441,22 @@ class FactoryScene extends Phaser.Scene {
       const pulse = trailPulse(this.time.now, still);
       for (const dot of goldenTrail(golden.progress)) {
         const at = goldenPoint(dot.progress, golden.lane, width, top, area);
-        g.fillStyle(GOLD, dot.alpha * pulse);
-        g.fillCircle(at.x, at.y, 3 + dot.alpha * 6);
+        front.fillStyle(GOLD, dot.alpha * pulse);
+        fillCircle(front, at.x, at.y, 3 + dot.alpha * 6);
       }
       const size = still ? 12 : 11 + Math.sin(this.time.now / 120) * 2;
-      g.fillStyle(GOLD, 0.18);
-      g.fillCircle(golden.x, golden.y, size * 2.2);
+      front.fillStyle(GOLD, 0.18);
+      fillCircle(front, golden.x, golden.y, size * 2.2);
       // Time left: the faint full circle is the whole 12 s, the bright arc what remains.
       const ring = size * 2.2 + 4;
-      g.lineStyle(2, GOLD, 0.2);
-      g.strokeCircle(golden.x, golden.y, ring);
-      g.lineStyle(2.5, GOLD, 0.95);
-      g.beginPath();
-      g.arc(golden.x, golden.y, ring, -Math.PI / 2, -Math.PI / 2 + ringSweep(golden.progress));
-      g.strokePath();
-      g.fillStyle(GOLD, 1);
-      g.fillTriangle(
+      front.lineStyle(2, GOLD, 0.2);
+      strokeCircle(front, golden.x, golden.y, ring);
+      front.lineStyle(2.5, GOLD, 0.95);
+      front.beginPath();
+      front.arc(golden.x, golden.y, ring, -Math.PI / 2, -Math.PI / 2 + ringSweep(golden.progress));
+      front.strokePath();
+      front.fillStyle(GOLD, 1);
+      front.fillTriangle(
         golden.x,
         golden.y - size,
         golden.x + size,
@@ -354,7 +464,7 @@ class FactoryScene extends Phaser.Scene {
         golden.x - size,
         golden.y,
       );
-      g.fillTriangle(
+      front.fillTriangle(
         golden.x,
         golden.y + size,
         golden.x + size,
