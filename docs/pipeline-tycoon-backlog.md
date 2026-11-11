@@ -10,33 +10,29 @@ old tabs are told to reload, and the CLI needs a new release (docs/04-pipeline-t
 
 ## Up next
 
-1. **Unsaved-play safety net** (M, save robustness). Keep the pending action log in localStorage
-   between saves so a killed tab (iOS memory pressure) does not lose up to 5 minutes; on the next
-   load, send it as the first save of the new session if the server's seq still matches, otherwise
-   drop it. Needs a careful server-side check and e2e test; read ADR-0006 first.
-2. **Performance pass** (M). Cap live packets and particles at high tiers, measure frame time at
+1. **Performance pass** (M). Cap live packets and particles at high tiers, measure frame time at
    iPhone width with CPU throttling in Playwright, record before/after numbers in the PR. (Phaser
    already pauses itself when the tab is hidden.)
-3. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
+2. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
    own 100 interns and nothing else, migrate with exactly 1 AP, 10 minutes without clicking, buy
    an upgrade within a second of affording it, own one of every tier, reach the ending without
    clicking after the first migration. Batch with another rules-bump item when possible.
-4. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
+3. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
    cap to 12 h then 24 h. Needs a "spend AP" control in the Migrate tab (AP stay a production
    bonus otherwise).
-5. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
+4. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
    time between purchases, look for walls of more than ~3 minutes with nothing to buy; retune only
    inside the pacing test's targets.
-6. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
+5. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
    `[A-Za-z0-9_]`, profanity filter), top 50 by lifetime Records, cached a few minutes. New
    expand-only migration in `apps/web/migrations-tycoon/` (deploy applies it).
-7. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
+6. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
    board; CLI panel.
-8. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
-9. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
+7. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
+8. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
    using the Web Share API on phones (copy to clipboard elsewhere): "I migrated my data platform
    3 times and processed 4.2 trillion records in Pipeline Tycoon" with the page link.
-10. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
+9. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
     the two stay alike; patch release, Ryan pushes the tag.
 
 ## Needs Ryan first
@@ -54,7 +50,12 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-04 (in [PR #51](https://github.com/TheRizz/personal-website/pull/51)): install on the home screen. The game has a web app manifest and
+- 2026-11-09 (in [PR #54](https://github.com/TheRizz/personal-website/pull/54)): unsaved-play safety net. Between saves the page keeps what you played in
+  this browser, so a tab the phone closes on its own (iOS under memory pressure, with no chance
+  to save) no longer loses up to 5 minutes: the next visit sends it along and the server adds it
+  first, if nothing has saved or started elsewhere since, and says "Picked up N moves you made
+  before the page closed". The time it covers comes out of "While you were away", never twice.
+- 2026-11-04 ([PR #51](https://github.com/TheRizz/personal-website/pull/51)): install on the home screen. The game has a web app manifest and
   its own icon (the scene's core with four tier nodes, on the scene's dark background), so on
   iPhone "Share, then Add to Home Screen" puts a "Tycoon" icon on the home screen that opens
   the game full screen with a black status bar; Android and desktop Chrome can install it too.
@@ -119,6 +120,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-10-30: golden packet you can't miss (scheduled run, [PR #45](https://github.com/TheRizz/personal-website/pull/45)).
 - 2026-11-04: PR #45 merged; keyboard help (scheduled run, [PR #48](https://github.com/TheRizz/personal-website/pull/48)).
 - 2026-11-04: PR #48 merged; install on the home screen (scheduled run, [PR #51](https://github.com/TheRizz/personal-website/pull/51)).
+- 2026-11-09: PR #51 merged; unsaved-play safety net (scheduled run, [PR #54](https://github.com/TheRizz/personal-website/pull/54)).
 
 ## How the scheduled runs work
 

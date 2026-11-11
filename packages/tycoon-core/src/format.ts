@@ -99,3 +99,8 @@ export function describeUndone(undone: Undone[]): string {
     parts.length === 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} and ${parts.at(-1)}`;
   return `The server undid ${list}.`;
 }
+
+/** "Picked up 37 moves you made before the page closed." (clicks count one each) */
+export function describeRecovered(moves: number): string {
+  return `Picked up ${moves} ${moves === 1 ? "move" : "moves"} you made before the page closed.`;
+}

@@ -287,6 +287,51 @@ test("a save whose reply is lost mid-play keeps everything played since", async 
   expect(errors).toEqual([]);
 });
 
+test("play a killed tab never saved comes back on the next visit", async ({ page }) => {
+  const scene = await play(page);
+  await scene.focus();
+  for (let i = 0; i < 40; i++) {
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(60);
+  }
+  await page.getByRole("button", { name: /Intern/ }).click();
+  await expect(page.getByRole("button", { name: /Intern/ })).toContainText(/Intern\s*1/);
+  // The tab keeps its unsaved play within a couple of seconds.
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("games.tycoon.unsaved")))
+    .toContain('"a":"buy"');
+
+  // The tab dies before its save gets anywhere (iOS closing it under memory pressure).
+  await page.evaluate(() => {
+    const send = window.fetch.bind(window);
+    window.fetch = (input, init) =>
+      String(input).includes("/api/tycoon/save") ? new Promise(() => {}) : send(input, init);
+  });
+  const errors = watchErrors(page, [/Failed to fetch manifest patches/]);
+  const session = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/session"));
+  await page.reload();
+  const started = await session;
+  expect(started.request().postDataJSON().unsaved.log.actions.length).toBeGreaterThan(1);
+  expect((await started.json()).recovered.moves).toBeGreaterThan(1);
+  // The notice shows as soon as the game starts, before the scene has finished loading.
+  await expect(
+    page.getByText(/^Picked up \d+ moves you made before the page closed\.$/),
+  ).toBeVisible();
+  await play(page);
+  await expect(page.getByRole("button", { name: /Intern/ })).toContainText(/Intern\s*1/);
+  await expect
+    .poll(() => page.evaluate(() => localStorage.getItem("games.tycoon.unsaved")))
+    .toBeNull();
+
+  // It is on the server now, not just kept in this browser.
+  await page.waitForLoadState("networkidle");
+  await page.reload();
+  await play(page);
+  await expect(page.getByRole("button", { name: /Intern/ })).toContainText(/Intern\s*1/);
+  await expect(page.getByText(/^Picked up/)).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test("Max buys every intern the bank allows and the shop shows what's next", async ({ page }) => {
   const errors = watchErrors(page);
   const scene = await play(page);

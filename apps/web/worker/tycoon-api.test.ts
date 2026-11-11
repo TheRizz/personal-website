@@ -138,6 +138,105 @@ describe("sessions", () => {
   });
 });
 
+describe("unsaved play from a closed tab", () => {
+  const clicks = (count: number, every = 1000): Action[] =>
+    Array.from({ length: count }, (_, i) => ({ t: (i + 1) * every, a: "click", n: 10 }));
+  const start = (auth: string, now: number, unsaved?: unknown) =>
+    call("POST", "session", now, { v: RULES_VERSION, ...(unsaved ? { unsaved } : {}) }, auth);
+
+  it("replays it first, then credits only the rest of the time as offline", async () => {
+    const auth = await newPlayer(0);
+    const s = await session(auth, 0);
+    // A minute of play the tab never saved, then it was killed; back 10 minutes after it began.
+    const unsaved = {
+      session: s.session,
+      seq: s.seq,
+      log: { elapsed: 61_000, actions: [...clicks(60), { t: 60_500, a: "buy", g: 1, n: 1 }] },
+    };
+    const back = await start(auth, 600_000, unsaved);
+    expect(back.status).toBe(200);
+    expect(back.json.seq).toBe(s.seq + 1);
+    expect(back.json.recovered).toEqual({ moves: 601, undone: [] });
+    expect(back.json.state.owned[1]).toBe(1);
+    expect(back.json.state.clicks).toBe(600);
+    // 61 s replayed plus 539 s offline: the 10 minutes counted once.
+    expect(back.json.offline.ms).toBe(539_000);
+    expect(back.json.state.playMs).toBeCloseTo(600_000, 0);
+
+    // The same play sent again is old news: the session it names has been replaced.
+    const again = await start(auth, 601_000, { ...unsaved, seq: back.json.seq });
+    expect(again.json.recovered).toBeUndefined();
+    expect(again.json.state.clicks).toBe(600);
+  });
+
+  it("credits no more time than really passed", async () => {
+    const auth = await newPlayer(0);
+    const s = await session(auth, 0);
+    const back = await start(auth, 10_000, {
+      session: s.session,
+      seq: s.seq,
+      log: { elapsed: 24 * HOUR, actions: clicks(5) },
+    });
+    // The clicks are squeezed into the 15 s that really passed, so some go over the click rate.
+    expect(back.json.recovered.moves).toBeLessThan(50);
+    expect(back.json.recovered.undone[0]).toMatchObject({ a: "click", reason: "click_rate" });
+    expect(back.json.state.playMs).toBeLessThanOrEqual(10_000 + SAVE_SLACK_MS);
+    expect(back.json.offline.ms).toBe(0);
+  });
+
+  it("is ignored when a save landed after it was kept", async () => {
+    const auth = await newPlayer(0);
+    const s = await session(auth, 0);
+    // The save sent on the way out reached the server after all.
+    expect((await save(auth, 11_000, s, 11_000, clicks(10))).status).toBe(200);
+    const back = await start(auth, 20_000, {
+      session: s.session,
+      seq: s.seq,
+      log: { elapsed: 11_000, actions: clicks(10) },
+    });
+    expect(back.status).toBe(200);
+    expect(back.json.recovered).toBeUndefined();
+    expect(back.json.seq).toBe(1);
+    expect(back.json.state.clicks).toBe(100);
+  });
+
+  it("is ignored when another device started a session since", async () => {
+    const auth = await newPlayer(0);
+    const s = await session(auth, 0);
+    await session(auth, 5_000);
+    const back = await start(auth, 20_000, {
+      session: s.session,
+      seq: s.seq,
+      log: { elapsed: 11_000, actions: clicks(10) },
+    });
+    expect(back.json.recovered).toBeUndefined();
+    expect(back.json.state.clicks).toBe(0);
+  });
+
+  it("drops what the rules can't allow, like any save", async () => {
+    const auth = await newPlayer(0);
+    const s = await session(auth, 0);
+    const back = await start(auth, 20_000, {
+      session: s.session,
+      seq: s.seq,
+      // A cron job with nothing in the bank.
+      log: { elapsed: 1_000, actions: [{ t: 500, a: "buy", g: 1, n: 1 }] },
+    });
+    expect(back.json.recovered).toEqual({
+      moves: 0,
+      undone: [{ a: "buy", reason: "too_expensive", count: 1 }],
+    });
+    expect(back.json.state.owned[1]).toBe(0);
+  });
+
+  it("refuses a malformed one", async () => {
+    const auth = await newPlayer(0);
+    await session(auth, 0);
+    const bad = await start(auth, 1_000, { session: "x", seq: -1, log: { elapsed: 0 } });
+    expect(bad.status).toBe(400);
+  });
+});
+
 describe("saves", () => {
   it("credits no more time than really passed, whatever the client claims", async () => {
     const auth = await newPlayer();

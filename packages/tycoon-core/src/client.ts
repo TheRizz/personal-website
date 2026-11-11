@@ -9,7 +9,7 @@ import {
   type Outcome,
 } from "./rules";
 import type { GoldenKind } from "./golden";
-import { AUTOSAVE_MS } from "./schema";
+import { AUTOSAVE_MS, unsavedPlaySchema, type UnsavedPlay } from "./schema";
 
 // The client side of ADR-0006, shared by the web page and the CLI so both sync exactly alike.
 //
@@ -45,6 +45,8 @@ export interface SessionStart {
   session: string;
   seq: number;
   offline: { ms: number; earned: number };
+  /** The unsaved play sent with the request, when the server took it: moves kept and undone. */
+  recovered?: { moves: number; undone: Undone[] };
 }
 
 export interface SaveAck {
@@ -60,6 +62,34 @@ export interface SaveAck {
 export interface CredentialStore {
   load(): string | null;
   save(credential: string | null): void;
+}
+
+/**
+ * Where a client keeps the play it hasn't saved yet (localStorage on the web), so a tab that is
+ * killed before its next save can send it with the next session start.
+ */
+export interface UnsavedStore {
+  load(): string | null;
+  save(value: string | null): void;
+}
+
+/** What an UnsavedStore holds: the unsaved play and the rules it was played under. */
+interface StoredUnsaved extends UnsavedPlay {
+  v: number;
+}
+
+/** Reads an UnsavedStore's value; null when missing, unreadable or from other rules. */
+export function readUnsaved(value: string | null): UnsavedPlay | null {
+  if (value === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    return null;
+  }
+  if ((parsed as Partial<StoredUnsaved> | null)?.v !== RULES_VERSION) return null;
+  const play = unsavedPlaySchema.safeParse(parsed);
+  return play.success ? play.data : null;
 }
 
 export interface ClientOptions {
@@ -152,11 +182,17 @@ export class TycoonClient {
     this.remember(`${player}.${token}`);
   }
 
-  /** Starts a session, creating an anonymous player first if this device has none. */
-  async startSession(): Promise<SessionStart> {
+  /**
+   * Starts a session, creating an anonymous player first if this device has none. `unsaved` is
+   * play a previous tab never saved; the server adds it first if nothing happened since.
+   */
+  async startSession(unsaved?: UnsavedPlay): Promise<SessionStart> {
     if (!this.hasPlayer()) await this.createPlayer();
     try {
-      return await this.request<SessionStart>("POST", "session", { v: RULES_VERSION });
+      return await this.request<SessionStart>("POST", "session", {
+        v: RULES_VERSION,
+        ...(unsaved ? { unsaved } : {}),
+      });
     } catch (error) {
       // The stored player no longer exists (or the secret is wrong): start over as a new one.
       if (error instanceof TycoonApiError && error.failure.kind === "unauthorized") {
@@ -208,6 +244,8 @@ const OFFLINE_NOTICE_MS = 60_000;
 const SLEPT_MS = 60_000;
 /** After a failed save, try again this much later. */
 const RETRY_MS = 30_000;
+/** Unsaved play is written to the UnsavedStore at most this often (and before every save). */
+const STASH_MS = 2_000;
 
 export type GameEvent =
   | { type: "click"; earned: number; count: number }
@@ -217,7 +255,8 @@ export type GameEvent =
   | { type: "achievement"; ids: string[] }
   | { type: "migrate" }
   | { type: "ending" }
-  | { type: "dropped"; count: number; undone: Undone[] };
+  | { type: "dropped"; count: number; undone: Undone[] }
+  | { type: "recovered"; moves: number; undone: Undone[] };
 
 export type Status =
   { kind: "loading" } | { kind: "playing" } | { kind: "stopped"; failure: ApiFailure };
@@ -257,6 +296,11 @@ export class TycoonController {
   private retryOnFailure = false;
   /** A resync is fetching a fresh session; saves wait for it. */
   private resyncing = false;
+  /** The save in flight: what it carried, so the UnsavedStore can still hold it until it lands. */
+  private sending: { start: number; actions: Action[] } | null = null;
+  /** Play since the UnsavedStore was last written. */
+  private stashDirty = false;
+  private stashedAt = 0;
   private lastTick = 0;
   /** Both clocks at the last frame, to tell when the device slept in between (see tick()). */
   private clockMark = { now: 0, wall: 0 };
@@ -272,11 +316,13 @@ export class TycoonController {
   /**
    * @param now a monotonic clock in ms (performance.now in browsers and Node)
    * @param wallClock for "saved at" times
+   * @param unsaved where to keep play between saves (none: a killed tab loses up to 5 minutes)
    */
   constructor(
     private readonly transport: Transport,
     private readonly now: () => number = () => performance.now(),
     private readonly wallClock: () => number = () => Date.now(),
+    private readonly unsaved: UnsavedStore | null = null,
   ) {}
 
   /** Starts (or restarts) a session with the server. */
@@ -284,11 +330,24 @@ export class TycoonController {
     const attempt = ++this.startAttempt;
     this.status = { kind: "loading" };
     this.changed();
+    const unsaved = readUnsaved(this.load());
     try {
-      const started = await this.transport.startSession();
+      let started: SessionStart;
+      try {
+        started = await this.transport.startSession(unsaved ?? undefined);
+      } catch (error) {
+        // The server refused the request itself (too large, malformed): forget the unsaved play
+        // rather than fail every load, and start without it.
+        if (!unsaved || !refused(error)) throw error;
+        this.store(null);
+        started = await this.transport.startSession();
+      }
       // A later start() superseded this one (and its session) while it was in flight.
       if (attempt !== this.startAttempt) return;
       this.begin(started);
+      if (started.recovered && started.recovered.moves > 0) {
+        this.emit({ type: "recovered", ...started.recovered });
+      }
     } catch (error) {
       if (attempt !== this.startAttempt) return;
       this.stop(error);
@@ -337,6 +396,62 @@ export class TycoonController {
     this.unconfirmed = null;
     this.retryOnFailure = false;
     this.resyncing = false;
+    this.sending = null;
+    // A new session: whatever was kept belonged to the old one (and was sent with this start).
+    this.store(null);
+    this.stashDirty = false;
+    this.stashedAt = now;
+  }
+
+  // ---- unsaved play (kept between saves so a killed tab can send it next time) ----
+
+  private load(): string | null {
+    try {
+      return this.unsaved?.load() ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  private store(value: string | null) {
+    try {
+      this.unsaved?.save(value);
+    } catch {
+      // Storage full or blocked: play is still saved every 5 minutes as before.
+    }
+  }
+
+  /** Everything not yet confirmed by the server, as one log from the last save we heard about. */
+  private unsavedLog(): { start: number; actions: Action[] } {
+    if (!this.sending) return this.pending;
+    const shift = this.pending.start - this.sending.start;
+    return {
+      start: this.sending.start,
+      actions: [
+        ...this.sending.actions,
+        ...this.pending.actions.map((a) => ({ ...a, t: a.t + shift })),
+      ],
+    };
+  }
+
+  /** Writes the unsaved play to the UnsavedStore (or clears it when there is none). */
+  private stash() {
+    if (!this.unsaved || !this.playing) return;
+    const now = this.now();
+    this.stashDirty = false;
+    this.stashedAt = now;
+    const log = this.unsavedLog();
+    if (log.actions.length === 0) {
+      this.store(null);
+      return;
+    }
+    const value: StoredUnsaved = {
+      v: RULES_VERSION,
+      session: this.session,
+      seq: this.seq,
+      log: { elapsed: Math.max(0, now - log.start), actions: log.actions },
+    };
+    this.store(JSON.stringify(value));
   }
 
   // ---- subscriptions ----
@@ -392,6 +507,7 @@ export class TycoonController {
       this.clickTokens + (ms * MAX_CLICKS_PER_SECOND) / 1000,
     );
     this.announceAchievements(before);
+    if (this.stashDirty && now - this.stashedAt >= STASH_MS) this.stash();
     if (slept) this.catchUp();
     else if (now >= this.nextSaveAt) void this.save();
   }
@@ -412,6 +528,7 @@ export class TycoonController {
     const outcome = apply(this.local, logged);
     if (!outcome.ok) return outcome;
     this.pending.actions.push(logged);
+    this.stashDirty = true;
     this.announceAchievements(before);
     if (this.pending.actions.length >= FLUSH_AT_ACTIONS) void this.save();
     this.changed();
@@ -442,6 +559,7 @@ export class TycoonController {
       this.pending.actions.push({ t: now - this.pending.start, a: "click", n: 1 });
       this.clickEntryBudget = Math.floor(tokens);
     }
+    this.stashDirty = true;
     this.announceAchievements(before);
     this.emit({ type: "click", earned: outcome.earned ?? 0, count: 1 });
     this.changed();
@@ -507,12 +625,15 @@ export class TycoonController {
 
   private async upload(unloading: boolean): Promise<void> {
     this.tick();
+    // Kept until the server confirms it: the page may be killed with this request in flight.
+    this.stash();
     const now = this.now();
     const sent = {
       start: this.pending.start,
       elapsed: now - this.pending.start,
       actions: this.pending.actions,
     };
+    this.sending = sent;
     this.pending = { start: now, actions: [] };
     this.clickTokens = MAX_CLICKS_PER_SECOND;
     this.nextSaveAt = now + AUTOSAVE_MS;
@@ -565,6 +686,11 @@ export class TycoonController {
       }
     } finally {
       this.saving = false;
+      if (this.sending === sent) {
+        this.sending = null;
+        // What is still unsaved now (nothing, or what came during the save), under the new seq.
+        this.stash();
+      }
       this.changed();
     }
   }
@@ -633,6 +759,7 @@ export class TycoonController {
   }
 
   private stop(error: unknown) {
+    this.sending = null;
     const failure: ApiFailure =
       error instanceof TycoonApiError ? error.failure : { kind: "network", detail: String(error) };
     this.status = { kind: "stopped", failure };
@@ -647,4 +774,13 @@ export class TycoonController {
   snapshot(): GameState | null {
     return this.local ? cloneState(this.local) : null;
   }
+}
+
+/** The server refused a request as such (4xx other than the ones with their own meaning). */
+function refused(error: unknown): boolean {
+  return (
+    error instanceof TycoonApiError &&
+    error.failure.kind === "network" &&
+    /^HTTP 4\d\d$/.test(error.failure.detail)
+  );
 }
