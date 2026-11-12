@@ -10,16 +10,13 @@ old tabs are told to reload, and the CLI needs a new release (docs/04-pipeline-t
 
 ## Up next
 
-1. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
-   `[A-Za-z0-9_]`, profanity filter), top 50 by lifetime Records, cached a few minutes. New
-   expand-only migration in `apps/web/migrations-tycoon/` (deploy applies it).
-2. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
+1. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
    board; CLI panel.
-3. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
-4. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
+2. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
+3. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
    using the Web Share API on phones (copy to clipboard elsewhere): "I migrated my data platform
    3 times and processed 4.2 trillion records in Pipeline Tycoon" with the page link.
-5. **CLI catches up** (S). Bring Max, wait times, milestone progress and the offline cap raise
+4. **CLI catches up** (S). Bring Max, wait times, milestone progress and the offline cap raise
    (Migrate panel) to the terminal shop so
    the two stay alike; patch release, Ryan pushes the tag.
 
@@ -38,6 +35,13 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
+- 2026-11-12 (in PR): leaderboard, part 1, API and storage (no rules bump, nothing visible yet).
+  `GET /api/tycoon/leaderboard` returns the top 50 named players by lifetime Records (ties share a
+  rank), cached 5 minutes at the edge; `GET`/`PUT`/`DELETE /api/tycoon/name` reads, picks or
+  changes, and drops a player's name. Names are 3 to 16 letters, digits and `_`, unique ignoring
+  case, and go through a small profanity filter shared with the page and CLI. Migration 0003 adds
+  `players.lifetime_records` (written with every save, filled in for existing players) and
+  `leaderboard_names` with a `hidden` flag for part 3, which sticks to the player through renames.
 - 2026-11-12 (in [PR #59](https://github.com/TheRizz/personal-website/pull/59)): balance check of the mid game, no retune needed (no rules bump). The pacing
   bot now reports the longest stretch with nothing at all affordable: 0.3 minutes at 5 taps a
   second and 1.7 minutes at 1 tap a second, against a 3-minute limit. Its longest waits between
@@ -144,6 +148,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-11-12: PR #55 merged; more achievements, rules v3 (scheduled run, [PR #57](https://github.com/TheRizz/personal-website/pull/57)).
 - 2026-11-12: PR #57 merged; offline cap upgrade, rules v4 (scheduled run, [PR #58](https://github.com/TheRizz/personal-website/pull/58)).
 - 2026-11-12: PR #58 merged; balance check of the mid game, no retune needed (scheduled run, [PR #59](https://github.com/TheRizz/personal-website/pull/59)).
+- 2026-11-12: PR #59 merged; leaderboard part 1, API and storage (scheduled run, PR pending).
 
 ## How the scheduled runs work
 

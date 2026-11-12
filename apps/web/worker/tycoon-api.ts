@@ -8,28 +8,37 @@
 //   POST /api/tycoon/pair      a 6-character code another device can claim (10 min, single use)
 //   POST /api/tycoon/pair/claim  claim a code → { player, token } for this device (rate-limited)
 //   DELETE /api/tycoon/device  forget this device's secret (unlinking)
+//   GET  /api/tycoon/leaderboard  top 50 named players by lifetime Records (public, cached)
+//   GET/PUT/DELETE /api/tycoon/name  this player's leaderboard name: read, pick or change, leave
 //
 // Players authenticate with `Authorization: Bearer <player>.<token>`, where the token is the
 // player's first secret or any linked device's (docs/04-pipeline-tycoon.md §3).
 
 import {
+  LEADERBOARD_CACHE_SECONDS,
+  LEADERBOARD_SIZE,
   MAX_SAVE_BYTES,
+  NAME_PROBLEM_MESSAGES,
   RULES_VERSION,
   PAIRING_CODE_ALPHABET,
   PAIRING_CODE_LENGTH,
   applyOffline,
   checkAchievements,
+  checkLeaderboardName,
   claimRequestSchema,
   gameStateSchema,
   normalisePairingCode,
   newGame,
   newGoldenSeed,
+  nameRequestSchema,
   replay,
   summariseDropped,
   saveRequestSchema,
   sessionRequestSchema,
   upgradeState,
   type GameState,
+  type Leaderboard,
+  type MyName,
   type SaveLog,
   type Undone,
 } from "@site/tycoon-core";
@@ -193,9 +202,19 @@ async function startSession(request: Request, env: TycoonEnv, now: number): Prom
     const session = crypto.randomUUID();
     const written = await env.TYCOON_DB.prepare(
       `UPDATE players SET state = ?, rules_version = ?, state_at = ?, session = ?, seq = ?,
-       updated_at = ? WHERE id = ? AND seq = ?`,
+       lifetime_records = ?, updated_at = ? WHERE id = ? AND seq = ?`,
     )
-      .bind(JSON.stringify(state), RULES_VERSION, now, session, seq, now, row.id, row.seq)
+      .bind(
+        JSON.stringify(state),
+        RULES_VERSION,
+        now,
+        session,
+        seq,
+        state.lifetimeRecords,
+        now,
+        row.id,
+        row.seq,
+      )
       .run();
     if (written.meta.changes !== 1) {
       const again = await readPlayer(env, row.id);
@@ -261,10 +280,20 @@ async function save(request: Request, env: TycoonEnv, now: number): Promise<Resp
   const seq = row.seq + 1;
   // Only if nothing else saved meanwhile: two concurrent saves can't both apply.
   const written = await env.TYCOON_DB.prepare(
-    `UPDATE players SET state = ?, rules_version = ?, state_at = ?, seq = ?, updated_at = ?
-     WHERE id = ? AND seq = ? AND session = ?`,
+    `UPDATE players SET state = ?, rules_version = ?, state_at = ?, seq = ?, lifetime_records = ?,
+     updated_at = ? WHERE id = ? AND seq = ? AND session = ?`,
   )
-    .bind(JSON.stringify(result.state), RULES_VERSION, now, seq, now, row.id, row.seq, row.session)
+    .bind(
+      JSON.stringify(result.state),
+      RULES_VERSION,
+      now,
+      seq,
+      result.state.lifetimeRecords,
+      now,
+      row.id,
+      row.seq,
+      row.session,
+    )
     .run();
   if (written.meta.changes !== 1) {
     return jsonError(409, "out_of_sync", "This save is out of date. Reload to continue.");
@@ -360,6 +389,145 @@ async function forgetDevice(request: Request, env: TycoonEnv): Promise<Response>
   return new Response(null, { status: 204, headers: noStore });
 }
 
+const LEADERBOARD_PATH = "/api/tycoon/leaderboard";
+
+/** The edge cache for the public board, where there is one (not in unit tests). */
+function edgeCache(): Cache | undefined {
+  return (globalThis as { caches?: { default?: Cache } }).caches?.default;
+}
+
+/** The cache key for the board: the same URL whatever the request's query string. */
+function leaderboardKey(request: Request): Request {
+  return new Request(new URL(LEADERBOARD_PATH, request.url).toString(), { method: "GET" });
+}
+
+/** A player's lifetime Records and their row on the board, if any. */
+interface NameRow {
+  name: string | null;
+  hidden: number | null;
+  lifetime_records: number;
+}
+
+async function readMyName(env: TycoonEnv, id: string): Promise<MyName> {
+  const row = await env.TYCOON_DB.prepare(
+    `SELECT n.name, n.hidden, p.lifetime_records FROM players p
+     LEFT JOIN leaderboard_names n ON n.player_id = p.id WHERE p.id = ?`,
+  )
+    .bind(id)
+    .first<NameRow>();
+  const records = row?.lifetime_records ?? 0;
+  const hidden = row?.hidden === 1;
+  if (!row?.name || hidden) return { name: row?.name ?? null, hidden, rank: null, records };
+  // Ties share the better rank.
+  const ahead = await env.TYCOON_DB.prepare(
+    `SELECT COUNT(*) AS ahead FROM leaderboard_names n JOIN players p ON p.id = n.player_id
+     WHERE n.hidden = 0 AND p.lifetime_records > ?`,
+  )
+    .bind(records)
+    .first<{ ahead: number }>();
+  return { name: row.name, hidden, rank: (ahead?.ahead ?? 0) + 1, records };
+}
+
+async function leaderboard(request: Request, env: TycoonEnv, now: number): Promise<Response> {
+  const cache = edgeCache();
+  const key = leaderboardKey(request);
+  const cached = await cache?.match(key);
+  if (cached) return cached;
+  const { results } = await env.TYCOON_DB.prepare(
+    `SELECT n.name, p.lifetime_records AS records FROM leaderboard_names n
+     JOIN players p ON p.id = n.player_id WHERE n.hidden = 0
+     ORDER BY p.lifetime_records DESC, n.created_at ASC LIMIT ?`,
+  )
+    .bind(LEADERBOARD_SIZE)
+    .all<{ name: string; records: number }>();
+  // Ties share the better rank: 1, 2, 2, 4.
+  const entries: Leaderboard["entries"] = [];
+  results.forEach((row, i) => {
+    const previous = entries[i - 1];
+    const rank = previous && previous.records === row.records ? previous.rank : i + 1;
+    entries.push({ rank, name: row.name, records: row.records });
+  });
+  const body: Leaderboard = { entries, at: now };
+  const response = Response.json(body, {
+    headers: { "Cache-Control": `public, max-age=${LEADERBOARD_CACHE_SECONDS}` },
+  });
+  if (cache) await cache.put(key, response.clone());
+  return response;
+}
+
+/** After a name changes, the next visitor reads the board fresh (in this data centre). */
+async function forgetCachedBoard(request: Request): Promise<void> {
+  await edgeCache()?.delete(leaderboardKey(request));
+}
+
+async function getName(request: Request, env: TycoonEnv): Promise<Response> {
+  const auth = await authenticate(request, env);
+  if (auth instanceof Response) return auth;
+  return Response.json(await readMyName(env, auth.row.id), { headers: noStore });
+}
+
+async function setName(request: Request, env: TycoonEnv, now: number): Promise<Response> {
+  const key = rateLimitKey(request.headers.get("CF-Connecting-IP"), "tycoon-name");
+  const { success } = await env.TYCOON_PAIR_LIMITER.limit({ key });
+  if (!success) {
+    return jsonError(429, "rate_limited", "Too many name changes; try again in a minute.", {
+      "Retry-After": "60",
+    });
+  }
+  const parsed = await readJson(request);
+  if (parsed instanceof Response) return parsed;
+  const body = nameRequestSchema.safeParse(parsed.body);
+  if (!body.success) {
+    return jsonError(400, "bad_request", 'Expected a JSON body like { "name": "data_wizard" }.');
+  }
+  const auth = await authenticate(request, env);
+  if (auth instanceof Response) return auth;
+  const check = checkLeaderboardName(body.data.name);
+  if (!check.ok) {
+    return Response.json(
+      {
+        error: { code: "invalid_name", message: NAME_PROBLEM_MESSAGES[check.problem] },
+        problem: check.problem,
+      },
+      { status: 400, headers: noStore },
+    );
+  }
+  const taken = () => jsonError(409, "name_taken", "Someone already has that name.");
+  const owner = await env.TYCOON_DB.prepare(
+    "SELECT player_id FROM leaderboard_names WHERE name = ?",
+  )
+    .bind(check.name)
+    .first<{ player_id: string }>();
+  if (owner && owner.player_id !== auth.row.id) return taken();
+  try {
+    // A hidden player stays hidden under a new name (moderation is per player).
+    await env.TYCOON_DB.prepare(
+      `INSERT INTO leaderboard_names (player_id, name, hidden, created_at, updated_at)
+       VALUES (?, ?, 0, ?, ?)
+       ON CONFLICT (player_id) DO UPDATE SET name = excluded.name, updated_at = excluded.updated_at`,
+    )
+      .bind(auth.row.id, check.name, now, now)
+      .run();
+  } catch (error) {
+    // Two players claiming the same name at once: the unique index lets only one in.
+    if (String(error).includes("UNIQUE")) return taken();
+    throw error;
+  }
+  await forgetCachedBoard(request);
+  return Response.json(await readMyName(env, auth.row.id), { headers: noStore });
+}
+
+async function leaveBoard(request: Request, env: TycoonEnv): Promise<Response> {
+  const auth = await authenticate(request, env);
+  if (auth instanceof Response) return auth;
+  // A hidden row stays, so leaving and rejoining doesn't undo moderation.
+  await env.TYCOON_DB.prepare("DELETE FROM leaderboard_names WHERE player_id = ? AND hidden = 0")
+    .bind(auth.row.id)
+    .run();
+  await forgetCachedBoard(request);
+  return new Response(null, { status: 204, headers: noStore });
+}
+
 /** Handles /api/tycoon/*. `now` is injectable for tests. */
 export async function handleTycoon(
   request: Request,
@@ -384,6 +552,13 @@ export async function handleTycoon(
         : methodNotAllowed("POST");
     case "/api/tycoon/device":
       return request.method === "DELETE" ? forgetDevice(request, env) : methodNotAllowed("DELETE");
+    case LEADERBOARD_PATH:
+      return request.method === "GET" ? leaderboard(request, env, now) : methodNotAllowed("GET");
+    case "/api/tycoon/name":
+      if (request.method === "GET") return getName(request, env);
+      if (request.method === "PUT") return setName(request, env, now);
+      if (request.method === "DELETE") return leaveBoard(request, env);
+      return methodNotAllowed("GET, PUT, DELETE");
     default:
       return jsonError(404, "not_found", "No such API route.");
   }
