@@ -41,7 +41,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-12 (in PR): offline cap upgrade (rules v4, CLI 0.1.3). The Migrate tab has a "Time
+- 2026-11-12 (in [PR #58](https://github.com/TheRizz/personal-website/pull/58)): offline cap upgrade (rules v4, CLI 0.1.3). The Migrate tab has a "Time
   away" section: spend 10 Architecture Points to keep pipelines running for 12 hours while you're
   away instead of 8, then 100 more for 24 hours. Spent points stop counting towards production
   (the confirm step shows the permanent bonus before and after), the cap survives migrations, and
@@ -136,7 +136,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-11-09: PR #51 merged; unsaved-play safety net (scheduled run, [PR #54](https://github.com/TheRizz/personal-website/pull/54)).
 - 2026-11-11: PR #54 merged; performance pass (scheduled run, [PR #55](https://github.com/TheRizz/personal-website/pull/55)).
 - 2026-11-12: PR #55 merged; more achievements, rules v3 (scheduled run, [PR #57](https://github.com/TheRizz/personal-website/pull/57)).
-- 2026-11-12: PR #57 merged; offline cap upgrade, rules v4 (scheduled run).
+- 2026-11-12: PR #57 merged; offline cap upgrade, rules v4 (scheduled run, [PR #58](https://github.com/TheRizz/personal-website/pull/58)).
 
 ## How the scheduled runs work
 
