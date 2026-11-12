@@ -34,7 +34,20 @@ export interface BotReport {
   firstMigrationAvailableMs: number | null;
   migrationTimesMs: number[];
   endingMs: number | null;
+  /**
+   * The longest stretch (ms) after the first purchase with nothing at all affordable: no
+   * generator and no available upgrade the bot could pay for. The balance check's "wall".
+   */
+  longestWallMs: number;
   state: GameState;
+}
+
+/** True when the player can pay for at least one generator or available upgrade right now. */
+export function canBuyAnything(state: GameState): boolean {
+  return (
+    GENERATORS.some((_, tier) => generatorCost(state, tier) <= state.records) ||
+    availableUpgrades(state).some((upgrade) => upgrade.cost <= state.records)
+  );
 }
 
 function bestPurchase(
@@ -78,8 +91,10 @@ export function runBot(options: BotOptions): BotReport {
     firstMigrationAvailableMs: null,
     migrationTimesMs: [],
     endingMs: null,
+    longestWallMs: 0,
     state,
   };
+  let wallSince: number | null = null;
   const step = options.stepMs ?? 5000;
   while (state.playMs < options.limitMs && !state.ended) {
     advance(state, step);
@@ -103,6 +118,13 @@ export function runBot(options: BotOptions): BotReport {
           : buyUpgrade(state, purchase.id).ok;
       if (!ok) break;
       report.firstPurchaseMs ??= state.playMs;
+    }
+    if (report.firstPurchaseMs !== null) {
+      if (canBuyAnything(state)) wallSince = null;
+      else wallSince ??= state.playMs;
+      if (wallSince !== null) {
+        report.longestWallMs = Math.max(report.longestWallMs, state.playMs - wallSince);
+      }
     }
     const gain = migrationGain(state);
     if (gain >= 1) report.firstMigrationAvailableMs ??= state.playMs;
