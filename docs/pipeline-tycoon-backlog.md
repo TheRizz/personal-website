@@ -10,30 +10,27 @@ old tabs are told to reload, and the CLI needs a new release (docs/04-pipeline-t
 
 ## Up next
 
-1. **Performance pass** (M). Cap live packets and particles at high tiers, measure frame time at
-   iPhone width with CPU throttling in Playwright, record before/after numbers in the PR. (Phaser
-   already pauses itself when the tab is hidden.)
-2. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
+1. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
    own 100 interns and nothing else, migrate with exactly 1 AP, 10 minutes without clicking, buy
    an upgrade within a second of affording it, own one of every tier, reach the ending without
    clicking after the first migration. Batch with another rules-bump item when possible.
-3. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
+2. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
    cap to 12 h then 24 h. Needs a "spend AP" control in the Migrate tab (AP stay a production
    bonus otherwise).
-4. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
+3. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
    time between purchases, look for walls of more than ~3 minutes with nothing to buy; retune only
    inside the pacing test's targets.
-5. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
+4. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
    `[A-Za-z0-9_]`, profanity filter), top 50 by lifetime Records, cached a few minutes. New
    expand-only migration in `apps/web/migrations-tycoon/` (deploy applies it).
-6. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
+5. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
    board; CLI panel.
-7. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
-8. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
+6. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
+7. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
    using the Web Share API on phones (copy to clipboard elsewhere): "I migrated my data platform
    3 times and processed 4.2 trillion records in Pipeline Tycoon" with the page link.
-9. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
-    the two stay alike; patch release, Ryan pushes the tag.
+8. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
+   the two stay alike; patch release, Ryan pushes the tag.
 
 ## Needs Ryan first
 
@@ -50,7 +47,13 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-09 (in [PR #54](https://github.com/TheRizz/personal-website/pull/54)): unsaved-play safety net. Between saves the page keeps what you played in
+- 2026-11-11 (in [PR #55](https://github.com/TheRizz/personal-website/pull/55)): performance pass. A late game (every tier owned, overclocked, the core
+  tapped fast) on a phone-speed CPU went from about 23 to about 56 frames a second, the same as
+  an empty factory. Packets are now sprites from one small texture instead of circles Phaser
+  re-cut into triangles every frame; the scene's other circles use as many corners as their
+  size needs instead of 100; the grid is drawn once per size; at most 150 packets (a fair share
+  per tier), 6 floating numbers and 8 rings show at once, reusing the oldest. Looks the same.
+- 2026-11-09 ([PR #54](https://github.com/TheRizz/personal-website/pull/54)): unsaved-play safety net. Between saves the page keeps what you played in
   this browser, so a tab the phone closes on its own (iOS under memory pressure, with no chance
   to save) no longer loses up to 5 minutes: the next visit sends it along and the server adds it
   first, if nothing has saved or started elsewhere since, and says "Picked up N moves you made
@@ -121,6 +124,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-11-04: PR #45 merged; keyboard help (scheduled run, [PR #48](https://github.com/TheRizz/personal-website/pull/48)).
 - 2026-11-04: PR #48 merged; install on the home screen (scheduled run, [PR #51](https://github.com/TheRizz/personal-website/pull/51)).
 - 2026-11-09: PR #51 merged; unsaved-play safety net (scheduled run, [PR #54](https://github.com/TheRizz/personal-website/pull/54)).
+- 2026-11-11: PR #54 merged; performance pass (scheduled run, [PR #55](https://github.com/TheRizz/personal-website/pull/55)).
 
 ## How the scheduled runs work
 
