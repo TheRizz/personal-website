@@ -129,11 +129,19 @@ One line per run: date (UTC), what happened, PR link.
 ## How the scheduled runs work
 
 - One open PR at a time. A run first looks at the last scheduled-run PR: if it is still open, the
-  run only addresses review comments and failing CI on it, then stops. If it was merged, the run
+  run only addresses review comments and failing CI on it, or merges it when green, then stops. If it was merged, the run
   moves its item to Done and starts the next one. If it was closed without merging, the item goes
   back to "Up next" with a note, or is struck if Ryan's comment says so.
-- Runs never merge, never push to `main`, never push tags (CLI releases stay with Ryan) and never
-  deploy. A rules bump says in the PR that a CLI tag is needed after deploy.
+- Since 2026-11-12 runs merge their own PR (squash) once the `ci` check is green, then wait for
+  the deploy. They do not merge, and label the PR `hold` instead, when the diff touches wrangler
+  config, D1 migrations, `.github/`, dependency versions, auth/Access code or anything outside
+  Pipeline Tycoon, or when it touches the save/sync path without an e2e test for it. A failed
+  deploy stops all runs until Ryan fixes it. Add the `hold` label or comment "wait" on a PR to
+  stop it being merged. Runs never push to `main` directly, never push tags (CLI releases stay
+  with Ryan) and never deploy by hand. A rules bump says in the PR that a CLI tag is needed after
+  deploy.
+- A weekly summary (Mondays 9:17 Pacific) lists what was merged, anything that failed, CLI tags
+  still needed and the next item. Reopen the game tab after a deploy to get the new version.
 - Each PR passes the unit tests, the pacing test and the browser tests, and checks the change at
   iPhone width (390 × 844).
 - The game's dark terminal scene stays as it is. Shop and overlays follow the site's text face,
