@@ -43,7 +43,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-12 (in PR): more achievements (rules v3, CLI 0.1.2). Eight new ones, each +1 % like the
+- 2026-11-12 (in [PR #57](https://github.com/TheRizz/personal-website/pull/57)): more achievements (rules v3, CLI 0.1.2). Eight new ones, each +1 % like the
   rest: Unpaid workforce (25 interns and nothing else), Full stack (one of every generator), Zero
   packet loss (3 golden packets in a row without missing one), Hands off (10 minutes without
   clicking, time away counts), Overclocked overclock (catch a golden packet while overclocked),
@@ -131,7 +131,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-11-04: PR #48 merged; install on the home screen (scheduled run, [PR #51](https://github.com/TheRizz/personal-website/pull/51)).
 - 2026-11-09: PR #51 merged; unsaved-play safety net (scheduled run, [PR #54](https://github.com/TheRizz/personal-website/pull/54)).
 - 2026-11-11: PR #54 merged; performance pass (scheduled run, [PR #55](https://github.com/TheRizz/personal-website/pull/55)).
-- 2026-11-12: PR #55 merged; more achievements, rules v3 (scheduled run, PR link below once open).
+- 2026-11-12: PR #55 merged; more achievements, rules v3 (scheduled run, [PR #57](https://github.com/TheRizz/personal-website/pull/57)).
 
 ## How the scheduled runs work
 
