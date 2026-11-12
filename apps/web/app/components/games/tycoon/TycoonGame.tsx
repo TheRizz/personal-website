@@ -19,6 +19,8 @@ import {
   generatorCost,
   maxAffordable,
   migrationGain,
+  nextOfflineLevel,
+  offlineCapMs,
   overclocked,
   nextMilestone,
   nextPointAt,
@@ -416,8 +418,11 @@ export function TycoonGame() {
             processed <strong className="tabular-nums">{fmt(controller.offline.earned)}</strong>{" "}
             records.
           </p>
-          {controller.offline.ms >= 8 * 3_600_000 && (
-            <p className="mt-2 text-sm text-muted">Offline progress is capped at 8 hours.</p>
+          {controller.offline.ms >= offlineCapMs(state) && (
+            <p className="mt-2 text-sm text-muted">
+              Offline progress is capped at {hours(offlineCapMs(state))}.
+              {nextOfflineLevel(state) && " The Migrate tab can raise that."}
+            </p>
           )}
           <button className={`${primaryButton} mt-5`} onClick={() => controller.dismissOffline()}>
             Back to work
@@ -711,7 +716,68 @@ function MigratePanel({ controller, state }: { controller: TycoonController; sta
           {gain < 1 ? "Not enough records yet" : "Start migration…"}
         </button>
       )}
+      <OfflineCap controller={controller} state={state} />
     </div>
+  );
+}
+
+/** "12 hours" */
+const hours = (ms: number) => `${Math.round(ms / 3_600_000)} hours`;
+
+/** Spending AP on a longer offline cap (rules v4), under the migration in the Migrate tab. */
+function OfflineCap({ controller, state }: { controller: TycoonController; state: GameState }) {
+  const [confirming, setConfirming] = useState(false);
+  const next = nextOfflineLevel(state);
+  const bonus = (ap: number) =>
+    `+${Math.round((AP_BONUS * ap + ACHIEVEMENT_BONUS * state.achievements.length) * 100).toLocaleString("en-US")} %`;
+  return (
+    <section aria-labelledby="offline-cap" className="mt-6 border-t border-line pt-4">
+      <h3 id="offline-cap" className="text-lg font-bold">
+        Time away
+      </h3>
+      <p className="mt-1 text-muted">
+        While you&apos;re away your pipelines keep running for up to{" "}
+        <strong className="text-fg" data-testid="offline-cap">
+          {hours(offlineCapMs(state))}
+        </strong>
+        .{" "}
+        {next
+          ? "Spend Architecture Points to keep them running longer. Spent points stop boosting production."
+          : "That's the longest it goes."}
+      </p>
+      {next &&
+        (confirming ? (
+          <div className="mt-3">
+            <p className="text-sm text-muted tabular-nums">
+              Permanent bonus goes from {bonus(state.ap)} to {bonus(state.ap - next.costAp)}.
+            </p>
+            <div className="mt-2 flex gap-2">
+              <button
+                className={primaryButton}
+                onClick={() => {
+                  controller.raiseOfflineCap();
+                  setConfirming(false);
+                }}
+              >
+                Spend {next.costAp} AP
+              </button>
+              <button className={secondaryButton} onClick={() => setConfirming(false)}>
+                Not yet
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            className={`${secondaryButton} mt-3 tabular-nums`}
+            disabled={state.ap < next.costAp}
+            onClick={() => setConfirming(true)}
+          >
+            {state.ap < next.costAp
+              ? `${hours(next.capMs)} needs ${next.costAp} AP`
+              : `Raise to ${hours(next.capMs)} for ${next.costAp} AP…`}
+          </button>
+        ))}
+    </section>
   );
 }
 
@@ -732,6 +798,7 @@ function StatsPanel({ controller, state }: { controller: TycoonController; state
     ["Clicks", state.clicks.toLocaleString("en-US")],
     ["Golden packets", state.goldenCaught.toLocaleString("en-US")],
     ["Migrations", state.migrations.toLocaleString("en-US")],
+    ["Offline cap", hours(offlineCapMs(state))],
     ["Upgrades owned", `${state.upgrades.filter((id) => UPGRADES_BY_ID.has(id)).length}`],
   ];
   return (

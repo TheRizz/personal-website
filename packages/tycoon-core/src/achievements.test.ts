@@ -63,7 +63,7 @@ describe("rules v3 achievements", () => {
     ]) {
       expect(ids).toContain(id);
     }
-    expect(RULES_VERSION).toBe(3);
+    expect(RULES_VERSION).toBeGreaterThanOrEqual(3);
   });
 
   it("Unpaid workforce: 25 interns and nothing else", () => {

@@ -56,6 +56,8 @@ relative to the last save — and the server **replays** it from the last state 
 - Golden packets come from a seeded schedule the server issues per session, so they can't be
   invented.
 - On load, offline time since the last save is credited up to **8 hours**, by the server's clock.
+  Since rules v4 a player can spend Architecture Points in the Migrate tab to raise that to 12 hours
+  (10 AP) and then 24 hours (100 AP more); spent points stop boosting production.
 
 ### 2.3 Few requests
 

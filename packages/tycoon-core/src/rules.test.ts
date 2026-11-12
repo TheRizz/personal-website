@@ -5,6 +5,7 @@ import { describeUndone, formatDuration, formatNumber, formatShort } from "./for
 import { goldenSpawn, upcomingGolden } from "./golden";
 import {
   OFFLINE_CAP_MS,
+  OFFLINE_LEVELS,
   RULES_VERSION,
   advance,
   apply,
@@ -21,6 +22,9 @@ import {
   migrate,
   migrationGain,
   newGame,
+  nextOfflineLevel,
+  offlineCapMs,
+  raiseOfflineCap,
   type Action,
   type GameState,
 } from "./rules";
@@ -253,6 +257,58 @@ describe("offline", () => {
     expect(earned).toBeGreaterThanOrEqual((rate * OFFLINE_CAP_MS) / 1000);
     expect(earned).toBeLessThan((rate * OFFLINE_CAP_MS * 1.3) / 1000);
   });
+
+  it("raises the cap to 12 and then 24 hours for Architecture Points", () => {
+    const HOUR = 3_600_000;
+    const state = midGame();
+    state.ap = 9;
+    expect(offlineCapMs(state)).toBe(8 * HOUR);
+    expect(nextOfflineLevel(state)).toEqual({ capMs: 12 * HOUR, costAp: 10 });
+    expect(raiseOfflineCap(state)).toEqual({ ok: false, reason: "too_few_ap" });
+    expect(state.offlineLevel).toBe(0);
+
+    state.ap = 115;
+    const before = baseRate(state);
+    expect(apply(state, { t: 0, a: "offline" })).toEqual({ ok: true });
+    expect(state.ap).toBe(105);
+    expect(offlineCapMs(state)).toBe(12 * HOUR);
+    // Spent points stop boosting production.
+    expect(baseRate(state)).toBeLessThan(before);
+
+    expect(raiseOfflineCap(state)).toEqual({ ok: true });
+    expect(state.ap).toBe(5);
+    expect(offlineCapMs(state)).toBe(24 * HOUR);
+    expect(nextOfflineLevel(state)).toBeNull();
+    expect(raiseOfflineCap(state)).toEqual({ ok: false, reason: "max_level" });
+    expect(OFFLINE_LEVELS).toHaveLength(3);
+  });
+
+  it("keeps the raised cap through a migration and credits time away up to it", () => {
+    const HOUR = 3_600_000;
+    const state = midGame();
+    state.ap = 10;
+    raiseOfflineCap(state);
+    state.runRecords = 4e9;
+    expect(migrate(state).ok).toBe(true);
+    expect(state.offlineLevel).toBe(1);
+    buyGenerator(state, 0, 1);
+    expect(applyOffline(state, 30 * HOUR).creditedMs).toBe(12 * HOUR);
+    // A long gap inside a save log is capped the same way.
+    const replayed = replay(state, {
+      elapsed: 20 * HOUR,
+      actions: [{ t: 20 * HOUR, a: "click", n: 1 }],
+    });
+    expect(replayed.state.playMs - state.playMs).toBe(12 * HOUR);
+  });
+
+  it("drops a raise the replayed state can't pay for, and says why", () => {
+    const log = { elapsed: 1_000, actions: [{ t: 0, a: "offline" as const }] };
+    const result = replay(newGame(), log);
+    expect(result.state.offlineLevel).toBe(0);
+    expect(describeUndone(summariseDropped(log, result.dropped))).toBe(
+      "The server undid 1 offline cap raise (not enough Architecture Points by the server's count).",
+    );
+  });
 });
 
 describe("schemas", () => {
@@ -276,6 +332,16 @@ describe("save upgrades", () => {
     const upgraded = upgradeState(gameStateSchema.parse(JSON.parse(JSON.stringify(v1))));
     expect(upgraded.v).toBe(RULES_VERSION);
     expect(upgraded.linked).toBe(false);
+  });
+
+  it("reads a rules-v3 save (no `offlineLevel`) as the 8-hour cap", () => {
+    const { offlineLevel: _level, ...v3 } = { ...midGame(), v: 3 };
+    const upgraded = upgradeState(gameStateSchema.parse(JSON.parse(JSON.stringify(v3))));
+    expect(upgraded.v).toBe(RULES_VERSION);
+    expect(upgraded.offlineLevel).toBe(0);
+    expect(offlineCapMs(upgraded)).toBe(OFFLINE_CAP_MS);
+    // A level past the table is refused rather than read as some other cap.
+    expect(gameStateSchema.safeParse({ ...upgraded, offlineLevel: 9 }).success).toBe(false);
   });
 });
 

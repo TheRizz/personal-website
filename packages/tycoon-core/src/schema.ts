@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { GENERATORS, UPGRADES_BY_ID } from "./data";
-import { RULES_VERSION, type GameState } from "./rules";
+import { OFFLINE_LEVELS, RULES_VERSION, type GameState } from "./rules";
 import type { SaveLog } from "./replay";
 
 // Shapes that cross the network or come out of storage. Everything the server receives is
@@ -30,6 +30,7 @@ export const actionSchema = z.discriminatedUnion("a", [
   z.object({ t: time, a: z.literal("up"), id: z.string().max(64) }),
   z.object({ t: time, a: z.literal("gold"), i: z.number().int().min(0).max(1_000_000) }),
   z.object({ t: time, a: z.literal("migrate") }),
+  z.object({ t: time, a: z.literal("offline") }),
 ]);
 
 export const saveLogSchema: z.ZodType<SaveLog> = z.object({
@@ -97,6 +98,8 @@ export const gameStateSchema: z.ZodType<GameState, unknown> = z
     runClicks: count.optional(),
     lastClickMs: amount.optional(),
     goldenStreak: count.default(0),
+    // Added in rules v4.
+    offlineLevel: count.max(OFFLINE_LEVELS.length - 1).default(0),
   })
   .transform(({ runClicks, lastClickMs, ...state }) => ({
     ...state,
@@ -114,6 +117,7 @@ export const gameStateSchema: z.ZodType<GameState, unknown> = z
  * - v2 → v3: `runClicks`, `lastClickMs` and `goldenStreak` added (gameStateSchema fills them in:
  *   every click so far counts as this run's, the idle clock starts at the current playMs, no
  *   streak); eight new achievements are checked when the state is next used.
+ * - v3 → v4: `offlineLevel` added (gameStateSchema defaults it to 0, the 8-hour cap everyone had).
  */
 export function upgradeState(state: GameState): GameState {
   return { ...state, v: RULES_VERSION };
