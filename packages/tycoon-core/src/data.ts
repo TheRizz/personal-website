@@ -339,7 +339,17 @@ export type AchievementTest =
   | { kind: "upgrades"; count: number }
   | { kind: "rate"; perSecond: number }
   | { kind: "ended" }
-  | { kind: "linked" };
+  | { kind: "linked" }
+  /** Own `count` of one tier and none of any other. */
+  | { kind: "onlyTier"; tier: number; count: number }
+  /** Own at least one of every tier. */
+  | { kind: "everyTier" }
+  /** Catch `count` golden packets in a row, missing none in between. */
+  | { kind: "goldenStreak"; count: number }
+  /** Let `ms` of play time pass without clicking (time away counts). */
+  | { kind: "idle"; ms: number }
+  /** Unlocked by an action at the moment it happens (rules.ts unlockOnEvent), never by state. */
+  | { kind: "event" };
 
 export interface Achievement {
   readonly id: string;
@@ -527,4 +537,56 @@ export const ACHIEVEMENTS: readonly Achievement[] = [
     blurb: "Link a second device (try the CLI).",
     test: { kind: "linked" },
   },
+  // Added in rules v3: odd ones that reward playing differently.
+  {
+    id: "unpaid-workforce",
+    name: "Unpaid workforce",
+    blurb: "Own 25 interns and nothing else.",
+    test: { kind: "onlyTier", tier: 0, count: 25 },
+  },
+  {
+    id: "full-stack",
+    name: "Full stack",
+    blurb: "Own one of every generator.",
+    test: { kind: "everyTier" },
+  },
+  {
+    id: "zero-packet-loss",
+    name: "Zero packet loss",
+    blurb: "Catch 3 golden packets in a row without missing one.",
+    test: { kind: "goldenStreak", count: 3 },
+  },
+  {
+    id: "hands-off",
+    name: "Hands off",
+    blurb: "Go 10 minutes without clicking. Time away counts.",
+    test: { kind: "idle", ms: 10 * 60 * 1000 },
+  },
+  {
+    id: "overclocked-overclock",
+    name: "Overclocked overclock",
+    blurb: "Catch a golden packet while already overclocked.",
+    test: { kind: "event" },
+  },
+  {
+    id: "minimum-viable-migration",
+    name: "Minimum viable migration",
+    blurb: "Migrate for exactly 1 Architecture Point.",
+    test: { kind: "event" },
+  },
+  {
+    id: "hotfix",
+    name: "Hotfix",
+    blurb: "Migrate less than 20 minutes into a run.",
+    test: { kind: "event" },
+  },
+  {
+    id: "fully-automated",
+    name: "Fully automated",
+    blurb: "Integrate Earth without clicking since your last migration.",
+    test: { kind: "event" },
+  },
 ];
+
+/** Event achievements' moments (rules.ts unlockOnEvent). */
+export const HOTFIX_RUN_MS = 20 * 60 * 1000;
