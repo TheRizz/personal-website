@@ -398,3 +398,126 @@ describe("pairing", () => {
     expect((await call("POST", "session", 0, { v: RULES_VERSION }, web)).status).toBe(200);
   });
 });
+
+describe("leaderboard", () => {
+  /** A player who has tapped `clicks` times in one second (the rules cap how many count). */
+  async function playerWith(clicks: number, now = 0) {
+    const auth = await newPlayer(now);
+    const s = await session(auth, now);
+    if (clicks > 0) {
+      const { status } = await save(auth, now + 1000, s, 1000, [{ t: 500, a: "click", n: clicks }]);
+      expect(status).toBe(200);
+    }
+    return auth;
+  }
+  const setName = (auth: string, name: unknown, now = 2000) =>
+    call("PUT", "name", now, { name }, auth);
+
+  it("keeps a copy of lifetime Records with every save", async () => {
+    const auth = await playerWith(30);
+    const id = auth.split(".")[0];
+    const [row] = sqlite
+      .prepare("SELECT lifetime_records, state FROM players WHERE id = ?")
+      .all(id) as { lifetime_records: number; state: string }[];
+    expect(row!.lifetime_records).toBe(JSON.parse(row!.state).lifetimeRecords);
+    expect(row!.lifetime_records).toBeGreaterThan(0);
+  });
+
+  it("is empty until someone picks a name, and shows only named players", async () => {
+    await playerWith(10);
+    let board = await call("GET", "leaderboard", 1000);
+    expect(board.status).toBe(200);
+    expect(board.json.entries).toEqual([]);
+
+    const named = await playerWith(20);
+    expect((await setName(named, "data_wizard")).status).toBe(200);
+    board = await call("GET", "leaderboard", 3000);
+    expect(board.json.entries).toEqual([
+      { rank: 1, name: "data_wizard", records: expect.any(Number) },
+    ]);
+  });
+
+  it("ranks by lifetime Records, ties share a rank, and caps at 50", async () => {
+    const low = await playerWith(5);
+    const high = await playerWith(50);
+    const tie = await playerWith(5);
+    await setName(low, "low_one");
+    await setName(high, "high_one");
+    await setName(tie, "tie_one");
+    const { json } = await call("GET", "leaderboard", 3000);
+    expect(json.entries.map((e: { name: string; rank: number }) => [e.rank, e.name])).toEqual([
+      [1, "high_one"],
+      [2, "low_one"],
+      [2, "tie_one"],
+    ]);
+    const mine = await call("GET", "name", 3000, undefined, tie);
+    expect(mine.json).toMatchObject({ name: "tie_one", hidden: false, rank: 2 });
+
+    for (let i = 0; i < 50; i++) {
+      const auth = await newPlayer();
+      await setName(auth, `filler_${i}`);
+    }
+    const capped = await call("GET", "leaderboard", 4000);
+    expect(capped.json.entries).toHaveLength(50);
+    expect(capped.json.entries[0].name).toBe("high_one");
+  });
+
+  it("checks names: length, characters, profanity, taken ignoring case", async () => {
+    const a = await playerWith(1);
+    const b = await playerWith(1);
+    expect((await setName(a, "ab")).json).toMatchObject({
+      error: { code: "invalid_name" },
+      problem: "length",
+    });
+    expect((await setName(a, "no spaces")).json.problem).toBe("characters");
+    expect((await setName(a, "Sh1t_happens")).json.problem).toBe("blocked");
+    expect((await setName(a, 42)).status).toBe(400);
+    expect((await setName(a, "Pipeline_Pro")).status).toBe(200);
+    const taken = await setName(b, "pipeline_pro");
+    expect(taken.status).toBe(409);
+    expect(taken.json.error.code).toBe("name_taken");
+    // Changing your own name's case is fine.
+    expect((await setName(a, "PIPELINE_PRO")).json.name).toBe("PIPELINE_PRO");
+  });
+
+  it("renaming keeps one entry; leaving takes the player off the board", async () => {
+    const auth = await playerWith(3);
+    await setName(auth, "first_name");
+    await setName(auth, "second_name");
+    let { json } = await call("GET", "leaderboard", 3000);
+    expect(json.entries.map((e: { name: string }) => e.name)).toEqual(["second_name"]);
+
+    expect((await call("DELETE", "name", 3000, undefined, auth)).status).toBe(204);
+    ({ json } = await call("GET", "leaderboard", 3000));
+    expect(json.entries).toEqual([]);
+    const mine = await call("GET", "name", 3000, undefined, auth);
+    expect(mine.json).toMatchObject({ name: null, rank: null });
+  });
+
+  it("a hidden player stays hidden when renaming or leaving and rejoining", async () => {
+    const auth = await playerWith(3);
+    await setName(auth, "rude_name");
+    sqlite.exec("UPDATE leaderboard_names SET hidden = 1");
+    await setName(auth, "nice_name");
+    await call("DELETE", "name", 3000, undefined, auth);
+    await setName(auth, "nicer_name");
+    const { json } = await call("GET", "leaderboard", 3000);
+    expect(json.entries).toEqual([]);
+    const mine = await call("GET", "name", 3000, undefined, auth);
+    expect(mine.json).toMatchObject({ name: "nicer_name", hidden: true, rank: null });
+  });
+
+  it("needs a player for names, and is cacheable for a few minutes", async () => {
+    expect((await call("GET", "name", 0)).status).toBe(401);
+    expect((await call("PUT", "name", 0, { name: "anyone" })).status).toBe(401);
+    const response = await handleTycoon(new Request(`${SITE}/api/tycoon/leaderboard`), env, 0);
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=300");
+    expect((await call("POST", "leaderboard", 0)).status).toBe(405);
+  });
+
+  it("limits name changes per IP", async () => {
+    const auth = await playerWith(1);
+    limiterAllows = false;
+    expect((await setName(auth, "too_fast")).status).toBe(429);
+  });
+});

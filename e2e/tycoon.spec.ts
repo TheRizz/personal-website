@@ -333,6 +333,49 @@ test("play a killed tab never saved comes back on the next visit", async ({ page
   expect(errors).toEqual([]);
 });
 
+test("a named player who saves shows on the leaderboard with their lifetime Records", async ({
+  request,
+}) => {
+  const created = await (await request.post("/api/tycoon/players")).json();
+  const auth = { Authorization: `Bearer ${created.player}.${created.token}` };
+  const started = await (
+    await request.post("/api/tycoon/session", { headers: auth, data: { v: RULES_VERSION } })
+  ).json();
+  const saved = await request.put("/api/tycoon/save", {
+    headers: auth,
+    data: {
+      v: RULES_VERSION,
+      session: started.session,
+      seq: 0,
+      log: { elapsed: 3000, actions: [1, 2, 3].map((s) => ({ t: s * 1000, a: "click", n: 10 })) },
+    },
+  });
+  expect(saved.status()).toBe(200);
+  const { state } = await saved.json();
+
+  // A unique name, since the local database outlives a single test run.
+  const name = `e2e_${Date.now().toString(36)}`;
+  expect(
+    (await request.put("/api/tycoon/name", { headers: auth, data: { name: "f_u_c_k" } })).status(),
+  ).toBe(400);
+  const named = await request.put("/api/tycoon/name", { headers: auth, data: { name } });
+  expect(named.status()).toBe(200);
+  expect(await named.json()).toMatchObject({ name, hidden: false, records: state.lifetimeRecords });
+
+  const board = await request.get("/api/tycoon/leaderboard");
+  expect(board.status()).toBe(200);
+  const { entries } = await board.json();
+  expect(entries).toContainEqual({
+    rank: expect.any(Number),
+    name,
+    records: state.lifetimeRecords,
+  });
+
+  expect((await request.delete("/api/tycoon/name", { headers: auth })).status()).toBe(204);
+  const after = await (await request.get("/api/tycoon/leaderboard")).json();
+  expect(after.entries.map((e: { name: string }) => e.name)).not.toContain(name);
+});
+
 test("Max buys every intern the bank allows and the shop shows what's next", async ({ page }) => {
   const errors = watchErrors(page);
   const scene = await play(page);

@@ -3,6 +3,7 @@ export * from "./data";
 export * from "./format";
 export * from "./golden";
 export * from "./insight";
+export * from "./leaderboard";
 export * from "./replay";
 export * from "./rules";
 export * from "./schema";

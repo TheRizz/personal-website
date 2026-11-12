@@ -67,6 +67,7 @@ relative to the last save — and the server **replays** it from the last state 
 | Each page load | `POST /api/tycoon/session` → canonical state with offline earnings applied, a new session id and golden-packet seed. Starting a session ends any other open session (newest wins). Carries the play a killed tab never saved, if any (below). |
 | Every 5 min, on tab close (`keepalive`), before a migration, at the ending | `PUT /api/tycoon/save` with the log since the last save. |
 | Linking (rare) | `POST /api/tycoon/pair` → a code; `POST /api/tycoon/pair/claim` → a secret for the new device; `DELETE /api/tycoon/device` to unlink (§3.1). |
+| Leaderboard (rare) | `GET /api/tycoon/leaderboard` → top 50 (public, edge-cached 5 min, cleared in that data centre when a name changes); `GET`/`PUT`/`DELETE /api/tycoon/name` → read, pick or change, or leave (§3.3). |
 
 About 12 requests per hour of active play, none per click. A save from a superseded session gets
 `409 session_replaced` and the page asks you to reload.
@@ -84,7 +85,8 @@ N moves you made before the page closed."
 
 A separate D1 database, `tycoon`, so game data never shares a database with the blog. One row per
 player (`players`: id, token hash, state JSON, rules version, state time, session id, save
-counter, timestamps), plus `devices` (one secret hash per linked device) and `pairing_codes`.
+counter, lifetime Records copied out of the state for sorting, timestamps), plus `devices` (one
+secret hash per linked device), `pairing_codes` and `leaderboard_names`.
 Expand-only migrations, like `blog`. Included in the nightly backup.
 
 ## 3. Phases
@@ -126,6 +128,16 @@ the rules: the sync controller and HTTP client (`TycoonController`, `TycoonClien
   dependencies (~110 kB gzipped). `stage.mjs` lays out exactly what goes to npm.
 - **Out of date:** a rules bump makes the server answer 426; the CLI says to run
   `npx @rymart/pipeline-tycoon@latest`.
+
+### 3.3 Leaderboard
+
+Opt-in: a player picks a name and appears on the board, ranked by lifetime Records (ties share a
+rank). Names are 3–16 of `[A-Za-z0-9_]`, unique ignoring case, and pass a small profanity filter
+(`checkLeaderboardName` in `tycoon-core/src/leaderboard.ts`, shared with the page and the CLI;
+look-alike digits, repeats and underscores are read through). Name changes share the pairing
+limiter's 10 a minute per IP. Moderation hides a player, not a name: a hidden player stays hidden
+after renaming or leaving and rejoining. The web and CLI screens and the `/admin` switch are the
+next two backlog items.
 
 ## 4. Owner to-dos
 
