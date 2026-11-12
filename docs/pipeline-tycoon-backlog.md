@@ -35,7 +35,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-12 (in PR): leaderboard, part 1, API and storage (no rules bump, nothing visible yet).
+- 2026-11-12 (in [PR #60](https://github.com/TheRizz/personal-website/pull/60)): leaderboard, part 1, API and storage (no rules bump, nothing visible yet).
   `GET /api/tycoon/leaderboard` returns the top 50 named players by lifetime Records (ties share a
   rank), cached 5 minutes at the edge; `GET`/`PUT`/`DELETE /api/tycoon/name` reads, picks or
   changes, and drops a player's name. Names are 3 to 16 letters, digits and `_`, unique ignoring
@@ -148,7 +148,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-11-12: PR #55 merged; more achievements, rules v3 (scheduled run, [PR #57](https://github.com/TheRizz/personal-website/pull/57)).
 - 2026-11-12: PR #57 merged; offline cap upgrade, rules v4 (scheduled run, [PR #58](https://github.com/TheRizz/personal-website/pull/58)).
 - 2026-11-12: PR #58 merged; balance check of the mid game, no retune needed (scheduled run, [PR #59](https://github.com/TheRizz/personal-website/pull/59)).
-- 2026-11-12: PR #59 merged; leaderboard part 1, API and storage (scheduled run, PR pending).
+- 2026-11-12: PR #59 merged; leaderboard part 1, API and storage (scheduled run, [PR #60](https://github.com/TheRizz/personal-website/pull/60)).
 
 ## How the scheduled runs work
 
