@@ -10,19 +10,16 @@ old tabs are told to reload, and the CLI needs a new release (docs/04-pipeline-t
 
 ## Up next
 
-1. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
-   time between purchases, look for walls of more than ~3 minutes with nothing to buy; retune only
-   inside the pacing test's targets.
-2. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
+1. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
    `[A-Za-z0-9_]`, profanity filter), top 50 by lifetime Records, cached a few minutes. New
    expand-only migration in `apps/web/migrations-tycoon/` (deploy applies it).
-3. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
+2. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
    board; CLI panel.
-4. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
-5. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
+3. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
+4. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
    using the Web Share API on phones (copy to clipboard elsewhere): "I migrated my data platform
    3 times and processed 4.2 trillion records in Pipeline Tycoon" with the page link.
-6. **CLI catches up** (S). Bring Max, wait times, milestone progress and the offline cap raise
+5. **CLI catches up** (S). Bring Max, wait times, milestone progress and the offline cap raise
    (Migrate panel) to the terminal shop so
    the two stay alike; patch release, Ryan pushes the tag.
 
@@ -41,7 +38,16 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-12 (in [PR #58](https://github.com/TheRizz/personal-website/pull/58)): offline cap upgrade (rules v4, CLI 0.1.3). The Migrate tab has a "Time
+- 2026-11-12 (in PR): balance check of the mid game, no retune needed (no rules bump). The pacing
+  bot now reports the longest stretch with nothing at all affordable: 0.3 minutes at 5 taps a
+  second and 1.7 minutes at 1 tap a second, against a 3-minute limit. Its longest waits between
+  purchases (5 to 7 minutes, around minute 60 and 110) are the bot saving up for a big upgrade
+  while cheaper generators stay affordable, so they aren't walls. A player who never taps does
+  stall for minutes after each migration (only golden bursts pay), which is by design: tapping
+  starts every run. The pacing test now fails if a tapping player (5 or 1 a second) ever waits
+  over 3 minutes with nothing to buy, and checks that 1 tap a second still reaches the ending
+  in under 5 hours (it takes about 4).
+- 2026-11-12 ([PR #58](https://github.com/TheRizz/personal-website/pull/58)): offline cap upgrade (rules v4, CLI 0.1.3). The Migrate tab has a "Time
   away" section: spend 10 Architecture Points to keep pipelines running for 12 hours while you're
   away instead of 8, then 100 more for 24 hours. Spent points stop counting towards production
   (the confirm step shows the permanent bonus before and after), the cap survives migrations, and
@@ -137,6 +143,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-11-11: PR #54 merged; performance pass (scheduled run, [PR #55](https://github.com/TheRizz/personal-website/pull/55)).
 - 2026-11-12: PR #55 merged; more achievements, rules v3 (scheduled run, [PR #57](https://github.com/TheRizz/personal-website/pull/57)).
 - 2026-11-12: PR #57 merged; offline cap upgrade, rules v4 (scheduled run, [PR #58](https://github.com/TheRizz/personal-website/pull/58)).
+- 2026-11-12: PR #58 merged; balance check of the mid game, no retune needed (scheduled run).
 
 ## How the scheduled runs work
 
