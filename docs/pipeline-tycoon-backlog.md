@@ -38,7 +38,7 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-12 (in PR): balance check of the mid game, no retune needed (no rules bump). The pacing
+- 2026-11-12 (in [PR #59](https://github.com/TheRizz/personal-website/pull/59)): balance check of the mid game, no retune needed (no rules bump). The pacing
   bot now reports the longest stretch with nothing at all affordable: 0.3 minutes at 5 taps a
   second and 1.7 minutes at 1 tap a second, against a 3-minute limit. Its longest waits between
   purchases (5 to 7 minutes, around minute 60 and 110) are the bot saving up for a big upgrade
@@ -143,7 +143,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-11-11: PR #54 merged; performance pass (scheduled run, [PR #55](https://github.com/TheRizz/personal-website/pull/55)).
 - 2026-11-12: PR #55 merged; more achievements, rules v3 (scheduled run, [PR #57](https://github.com/TheRizz/personal-website/pull/57)).
 - 2026-11-12: PR #57 merged; offline cap upgrade, rules v4 (scheduled run, [PR #58](https://github.com/TheRizz/personal-website/pull/58)).
-- 2026-11-12: PR #58 merged; balance check of the mid game, no retune needed (scheduled run).
+- 2026-11-12: PR #58 merged; balance check of the mid game, no retune needed (scheduled run, [PR #59](https://github.com/TheRizz/personal-website/pull/59)).
 
 ## How the scheduled runs work
 
