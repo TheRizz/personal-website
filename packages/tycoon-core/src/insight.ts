@@ -69,8 +69,27 @@ export function achievementProgress(
       return { current: state.upgrades.length, target: test.count };
     case "rate":
       return { current: state.bestRate, target: test.perSecond };
+    case "onlyTier":
+      // Any other generator owned rules it out until the next migration.
+      return state.owned.every((owned, tier) => tier === test.tier || owned === 0)
+        ? { current: state.owned[test.tier] ?? 0, target: test.count }
+        : null;
+    case "everyTier":
+      return {
+        current: state.owned.filter((owned) => owned >= 1).length,
+        target: GENERATORS.length,
+      };
+    case "goldenStreak":
+      return { current: state.goldenStreak, target: test.count };
+    case "idle":
+      // Minutes, so the stats line reads "4/10".
+      return {
+        current: Math.floor(Math.max(0, state.playMs - state.lastClickMs) / 60_000),
+        target: test.ms / 60_000,
+      };
     case "ended":
     case "linked":
+    case "event":
       return null;
   }
 }

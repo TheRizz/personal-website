@@ -123,6 +123,33 @@ describe("sessions", () => {
     expect(s.offline.earned).toBeLessThan((OFFLINE_CAP_MS / 1000) * 1.1);
   });
 
+  it("brings a rules-v2 save up to date and credits the idle achievement from time away", async () => {
+    const auth = await newPlayer(0);
+    await session(auth, 0);
+    const [id] = auth.split(".");
+    const row = sqlite.prepare("SELECT state FROM players WHERE id = ?").all(id)[0]! as {
+      state: string;
+    };
+    // What a v2 save looked like: no runClicks, lastClickMs or goldenStreak.
+    const {
+      runClicks: _r,
+      lastClickMs: _l,
+      goldenStreak: _g,
+      ...v2
+    } = JSON.parse(row.state) as GameState;
+    sqlite
+      .prepare("UPDATE players SET state = ?, rules_version = 2 WHERE id = ?")
+      .run(JSON.stringify({ ...v2, v: 2, clicks: 12, playMs: 5_000 }), id);
+
+    const s = await session(auth, HOUR);
+    expect(s.state.v).toBe(RULES_VERSION);
+    expect(s.state.runClicks).toBe(12);
+    expect(s.state.lastClickMs).toBe(5_000);
+    expect(s.state.goldenStreak).toBe(0);
+    // An hour away is more than ten minutes without a click.
+    expect(s.state.achievements).toContain("hands-off");
+  });
+
   it("refuses an outdated client", async () => {
     const auth = await newPlayer();
     expect((await call("POST", "session", 0, { v: RULES_VERSION - 1 }, auth)).status).toBe(426);

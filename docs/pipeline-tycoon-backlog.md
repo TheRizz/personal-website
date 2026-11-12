@@ -10,26 +10,22 @@ old tabs are told to reload, and the CLI needs a new release (docs/04-pipeline-t
 
 ## Up next
 
-1. **More achievements** (S, rules bump). 8–10 fun ones: catch 3 golden packets in one session,
-   own 100 interns and nothing else, migrate with exactly 1 AP, 10 minutes without clicking, buy
-   an upgrade within a second of affording it, own one of every tier, reach the ending without
-   clicking after the first migration. Batch with another rules-bump item when possible.
-2. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
+1. **Offline cap upgrade** (M, rules bump). An AP-priced upgrade that raises the 8-hour offline
    cap to 12 h then 24 h. Needs a "spend AP" control in the Migrate tab (AP stay a production
    bonus otherwise).
-3. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
+2. **Balance check of the mid game** (M, rules bump only if needed). Run the pacing bot, chart
    time between purchases, look for walls of more than ~3 minutes with nothing to buy; retune only
    inside the pacing test's targets.
-4. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
+3. **Leaderboard, part 1: API and storage** (M, phase 3 of the spec). Opt-in name (3–16 of
    `[A-Za-z0-9_]`, profanity filter), top 50 by lifetime Records, cached a few minutes. New
    expand-only migration in `apps/web/migrations-tycoon/` (deploy applies it).
-5. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
+4. **Leaderboard, part 2: web and CLI UI** (M). Stats tab section to pick a name and see the
    board; CLI panel.
-6. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
-7. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
+5. **Leaderboard, part 3: moderation** (S). Hide a name from `/admin`.
+6. **Share a milestone** (S, no rules bump). After a migration or the ending, a Share button
    using the Web Share API on phones (copy to clipboard elsewhere): "I migrated my data platform
    3 times and processed 4.2 trillion records in Pipeline Tycoon" with the page link.
-8. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
+7. **CLI catches up** (S). Bring Max, wait times and milestone progress to the terminal shop so
    the two stay alike; patch release, Ryan pushes the tag.
 
 ## Needs Ryan first
@@ -47,7 +43,17 @@ Runs skip these until Ryan writes a decision under the item.
 
 ## Done
 
-- 2026-11-11 (in [PR #55](https://github.com/TheRizz/personal-website/pull/55)): performance pass. A late game (every tier owned, overclocked, the core
+- 2026-11-12 (in PR): more achievements (rules v3, CLI 0.1.2). Eight new ones, each +1 % like the
+  rest: Unpaid workforce (25 interns and nothing else), Full stack (one of every generator), Zero
+  packet loss (3 golden packets in a row without missing one), Hands off (10 minutes without
+  clicking, time away counts), Overclocked overclock (catch a golden packet while overclocked),
+  Minimum viable migration (migrate for exactly 1 AP), Hotfix (migrate under 20 minutes into a
+  run), Fully automated (Integrate Earth without clicking since the last migration). The ones
+  that count show progress in Stats. Saves gain `runClicks`, `lastClickMs` and `goldenStreak`;
+  older saves fill them in. Left out: "buy an upgrade within a second of affording it" (needs
+  the time each price became affordable, which the rules don't keep); 100 interns alone became
+  25 because 100 costs over 100 million records at 10 a second.
+- 2026-11-11 ([PR #55](https://github.com/TheRizz/personal-website/pull/55)): performance pass. A late game (every tier owned, overclocked, the core
   tapped fast) on a phone-speed CPU went from about 23 to about 56 frames a second, the same as
   an empty factory. Packets are now sprites from one small texture instead of circles Phaser
   re-cut into triangles every frame; the scene's other circles use as many corners as their
@@ -125,6 +131,7 @@ One line per run: date (UTC), what happened, PR link.
 - 2026-11-04: PR #48 merged; install on the home screen (scheduled run, [PR #51](https://github.com/TheRizz/personal-website/pull/51)).
 - 2026-11-09: PR #51 merged; unsaved-play safety net (scheduled run, [PR #54](https://github.com/TheRizz/personal-website/pull/54)).
 - 2026-11-11: PR #54 merged; performance pass (scheduled run, [PR #55](https://github.com/TheRizz/personal-website/pull/55)).
+- 2026-11-12: PR #55 merged; more achievements, rules v3 (scheduled run, PR link below once open).
 
 ## How the scheduled runs work
 

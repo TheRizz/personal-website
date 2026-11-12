@@ -3,6 +3,7 @@ import {
   ACHIEVEMENT_BONUS,
   COST_GROWTH,
   GENERATORS,
+  HOTFIX_RUN_MS,
   UPGRADES,
   UPGRADES_BY_ID,
   type AchievementTest,
@@ -15,7 +16,7 @@ import { goldenSpawn, type GoldenKind } from "./golden";
  * Bumped whenever a rule or number changes, so the server can refuse clients that would replay
  * differently (docs/04-pipeline-tycoon.md §2.1). `upgradeState` migrates stored saves forward.
  */
-export const RULES_VERSION = 2;
+export const RULES_VERSION = 3;
 
 /** Offline time is credited up to this much, by the server's clock. */
 export const OFFLINE_CAP_MS = 8 * 60 * 60 * 1000;
@@ -45,6 +46,12 @@ export interface GameState {
   /** Simulated play time this run (ms). */
   runMs: number;
   clicks: number;
+  /** Clicks this run (since rules v3). */
+  runClicks: number;
+  /** playMs of the last click, or of the start of the game (since rules v3). */
+  lastClickMs: number;
+  /** Golden packets caught in a row without missing one (since rules v3). */
+  goldenStreak: number;
   /** Units owned per tier, cheapest first. */
   owned: number[];
   /** Upgrade ids bought this run. */
@@ -74,6 +81,9 @@ export function newGame(): GameState {
     playMs: 0,
     runMs: 0,
     clicks: 0,
+    runClicks: 0,
+    lastClickMs: 0,
+    goldenStreak: 0,
     owned: GENERATORS.map(() => 0),
     upgrades: [],
     ap: 0,
@@ -224,7 +234,24 @@ function passes(state: GameState, test: AchievementTest): boolean {
       return state.ended;
     case "linked":
       return state.linked;
+    case "onlyTier":
+      return state.owned.every((owned, tier) =>
+        tier === test.tier ? owned >= test.count : owned === 0,
+      );
+    case "everyTier":
+      return state.owned.every((owned) => owned >= 1);
+    case "goldenStreak":
+      return state.goldenStreak >= test.count;
+    case "idle":
+      return state.playMs - state.lastClickMs >= test.ms;
+    case "event":
+      return false;
   }
+}
+
+/** Unlocks an event achievement (data.ts, kind "event") at the moment its action happens. */
+function unlockOnEvent(state: GameState, id: string): void {
+  if (!state.achievements.includes(id)) state.achievements.push(id);
 }
 
 /** Unlocks achievements the state now passes and records the best rate. Returns the new ids. */
@@ -251,9 +278,14 @@ const LIFETIME_THRESHOLDS = ACHIEVEMENTS.flatMap((a) =>
   a.test.kind === "lifetime" ? [{ id: a.id, records: a.test.records }] : [],
 ).sort((a, b) => a.records - b.records);
 
+/** The idle achievement's length, if there is one (data.ts, kind "idle"). */
+const IDLE_THRESHOLDS = ACHIEVEMENTS.flatMap((a) =>
+  a.test.kind === "idle" ? [{ id: a.id, ms: a.test.ms }] : [],
+);
+
 /**
  * Lets `ms` of play time pass. Production accrues at a rate that only changes at an overclock's
- * end or when a lifetime achievement unlocks, so this splits at exactly those moments: passing
+ * end or when a lifetime or idle achievement unlocks, so this splits at exactly those moments: passing
  * time in many small steps or one big one gives the same result (the client ticks every frame,
  * the server replays between actions).
  */
@@ -269,10 +301,23 @@ export function advance(state: GameState, ms: number): void {
       const untilThreshold = ((threshold.records - state.lifetimeRecords) * 1000) / speed;
       if (untilThreshold < step) step = Math.max(0, untilThreshold);
     }
+    let idleReached: string | null = null;
+    for (const idle of IDLE_THRESHOLDS) {
+      if (state.achievements.includes(idle.id)) continue;
+      const untilIdle = state.lastClickMs + idle.ms - state.playMs;
+      if (untilIdle > 0 && untilIdle <= step) {
+        step = untilIdle;
+        idleReached = idle.id;
+      }
+    }
     earn(state, (speed * step) / 1000);
     state.playMs += step;
     state.runMs += step;
     left -= step;
+    // The step ended on the idle mark: unlock it even if rounding left playMs a hair short.
+    if (idleReached && !state.achievements.includes(idleReached)) {
+      state.achievements.push(idleReached);
+    }
     const unlocked = checkAchievements(state);
     // A threshold that rounding left a hair short: unlock it rather than loop on a zero step.
     if (step === 0 && unlocked.length === 0 && threshold) {
@@ -298,6 +343,8 @@ export function click(state: GameState, count: number): Outcome {
   const earned = clickValue(state) * count;
   earn(state, earned);
   state.clicks += count;
+  state.runClicks += count;
+  state.lastClickMs = state.playMs;
   checkAchievements(state);
   return { ok: true, earned };
 }
@@ -320,7 +367,10 @@ export function buyUpgrade(state: GameState, id: string): Outcome {
   if (!canAfford(state, upgrade.cost)) return { ok: false, reason: "too_expensive" };
   spend(state, upgrade.cost);
   state.upgrades.push(upgrade.id);
-  if (upgrade.effect.kind === "ending") state.ended = true;
+  if (upgrade.effect.kind === "ending") {
+    state.ended = true;
+    if (state.migrations > 0 && state.runClicks === 0) unlockOnEvent(state, "fully-automated");
+  }
   checkAchievements(state);
   return { ok: true };
 }
@@ -332,6 +382,8 @@ export function catchGolden(state: GameState, index: number): Outcome {
   if (state.playMs < spawn.at || state.playMs > spawn.at + spawn.visibleMs) {
     return { ok: false, reason: "not_visible" };
   }
+  if (overclocked(state)) unlockOnEvent(state, "overclocked-overclock");
+  state.goldenStreak = index === state.golden.next ? state.goldenStreak + 1 : 1;
   state.golden.next = index + 1;
   state.goldenCaught += 1;
   let earned: number | undefined;
@@ -349,11 +401,14 @@ export function catchGolden(state: GameState, index: number): Outcome {
 export function migrate(state: GameState): Outcome {
   const gain = migrationGain(state);
   if (gain < 1) return { ok: false, reason: "too_early" };
+  if (gain === 1) unlockOnEvent(state, "minimum-viable-migration");
+  if (state.runMs < HOTFIX_RUN_MS) unlockOnEvent(state, "hotfix");
   state.ap += gain;
   state.migrations += 1;
   state.records = 0;
   state.runRecords = 0;
   state.runMs = 0;
+  state.runClicks = 0;
   state.owned = GENERATORS.map(() => 0);
   state.upgrades = [];
   state.overclockUntil = 0;

@@ -360,6 +360,52 @@ test("Max buys every intern the bank allows and the shop shows what's next", asy
   expect(errors).toEqual([]);
 });
 
+test("the new achievements count progress, save it and keep it after a reload", async ({
+  page,
+}) => {
+  const errors = watchErrors(page, [/Failed to fetch manifest patches/]);
+  const scene = await play(page);
+  await scene.focus();
+  for (let i = 0; i < 50; i++) {
+    await page.keyboard.press("Space");
+    await page.waitForTimeout(55);
+  }
+  // Interns only: "Unpaid workforce" counts them while nothing else is owned.
+  await page
+    .getByRole("group", { name: "Buy amount" })
+    .getByRole("button", { name: "Max" })
+    .click();
+  const intern = page.getByRole("button", { name: /Intern/ });
+  await intern.click();
+  const owned = Number(await intern.getByLabel(/owned$/).textContent());
+  expect(owned).toBeGreaterThanOrEqual(2);
+
+  await page.getByRole("tab", { name: "Stats" }).click();
+  const unpaid = page.getByRole("listitem").filter({ hasText: "Own 25 interns and nothing else." });
+  await expect(unpaid).toContainText(`${owned}/25`);
+  await expect(page.getByRole("heading", { name: /^Achievements \d+\/38$/ })).toBeVisible();
+
+  // The server replays the clicks under the same rules and keeps the new counters.
+  const saved = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/save"));
+  await page.getByRole("button", { name: "Save now" }).click();
+  const reply = await saved;
+  expect(reply.status()).toBe(200);
+  const { state } = (await reply.json()) as { state: GameState };
+  expect(state.v).toBe(RULES_VERSION);
+  expect(state.runClicks).toBeGreaterThanOrEqual(40);
+  expect(state.lastClickMs).toBeGreaterThan(0);
+  expect(state.goldenStreak).toBe(0);
+
+  await page.waitForLoadState("networkidle");
+  await page.reload();
+  await play(page);
+  await page.getByRole("tab", { name: "Stats" }).click();
+  await expect(
+    page.getByRole("listitem").filter({ hasText: "Own 25 interns and nothing else." }),
+  ).toContainText(`${owned}/25`);
+  expect(errors).toEqual([]);
+});
+
 test("a tab running an old build offers to save and reload", async ({ page }) => {
   await page.route("**/api/health", (route) =>
     route.fulfill({ json: { ok: true, version: "a-newer-build" } }),

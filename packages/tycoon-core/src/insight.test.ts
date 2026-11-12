@@ -86,7 +86,7 @@ describe("achievementProgress", () => {
     expect(achievementProgress(state, hundred)).toEqual({ current: 60, target: 100 });
     for (const achievement of ACHIEVEMENTS) {
       const progress = achievementProgress(state, achievement);
-      if (achievement.test.kind === "ended" || achievement.test.kind === "linked") {
+      if (["ended", "linked", "event"].includes(achievement.test.kind)) {
         expect(progress).toBeNull();
       } else {
         expect(progress?.target).toBeGreaterThan(0);
