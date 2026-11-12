@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { expect, test, type Page } from "@playwright/test";
 import { RULES_VERSION, goldenSpawn, type GameState } from "@site/tycoon-core";
 
@@ -403,6 +404,77 @@ test("the new achievements count progress, save it and keep it after a reload", 
   await expect(
     page.getByRole("listitem").filter({ hasText: "Own 25 interns and nothing else." }),
   ).toContainText(`${owned}/25`);
+  expect(errors).toEqual([]);
+});
+
+/**
+ * Gives this browser's player Architecture Points straight in the local D1 the preview serves
+ * (earning them takes a 45-minute run). The page must reload afterwards to start from it.
+ */
+async function grantAp(page: Page, ap: number) {
+  const credential = await page.evaluate(() => localStorage.getItem("games.tycoon.player"));
+  const id = credential?.split(".")[0] ?? "";
+  expect(id).toMatch(/^[\w-]+$/);
+  execFileSync(
+    "pnpm",
+    [
+      "--filter",
+      "web",
+      "exec",
+      "wrangler",
+      "d1",
+      "execute",
+      "tycoon",
+      "--local",
+      "--command",
+      `UPDATE players SET state = json_set(state, '$.ap', ${ap}) WHERE id = '${id}'`,
+    ],
+    { stdio: "pipe" },
+  );
+}
+
+test("AP raise the offline cap, the server keeps it and it shows after a reload", async ({
+  page,
+}) => {
+  test.setTimeout(60_000);
+  const errors = watchErrors(page, [/Failed to fetch manifest patches/]);
+  await play(page);
+  await page.getByRole("tab", { name: "Migrate" }).click();
+  await expect(page.getByTestId("offline-cap")).toHaveText("8 hours");
+  await expect(page.getByRole("button", { name: "12 hours needs 10 AP" })).toBeDisabled();
+
+  await page.waitForLoadState("networkidle");
+  await grantAp(page, 25);
+  await page.reload();
+  await play(page);
+  await page.getByRole("tab", { name: "Migrate" }).click();
+  await page.getByRole("button", { name: "Raise to 12 hours for 10 AP…" }).click();
+  await expect(
+    page.getByText(/^Permanent bonus goes from \+2,5\d\d % to \+1,5\d\d %\.$/),
+  ).toBeVisible();
+  // Spending saves at once; the server replays the raise against the AP it has stored.
+  const saved = page.waitForResponse((r) => r.url().endsWith("/api/tycoon/save"));
+  await page.getByRole("button", { name: "Spend 10 AP" }).click();
+  const reply = await saved;
+  expect(reply.status()).toBe(200);
+  const body = (await reply.json()) as { state: GameState; dropped: number };
+  expect(body.state.v).toBe(RULES_VERSION);
+  expect(body.state.offlineLevel).toBe(1);
+  expect(body.state.ap).toBe(15);
+  expect(body.dropped).toBe(0);
+  await expect(page.getByTestId("offline-cap")).toHaveText("12 hours");
+  await expect(page.getByRole("button", { name: "24 hours needs 100 AP" })).toBeDisabled();
+
+  await page.waitForLoadState("networkidle");
+  await page.reload();
+  await play(page);
+  await page.getByRole("tab", { name: "Migrate" }).click();
+  await expect(page.getByTestId("offline-cap")).toHaveText("12 hours");
+  await expect(page.getByRole("tabpanel").getByText("15 AP", { exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "Stats" }).click();
+  await expect(
+    page.locator("dt", { hasText: /^Offline cap$/ }).locator("xpath=following-sibling::dd[1]"),
+  ).toHaveText("12 hours");
   expect(errors).toEqual([]);
 });
 

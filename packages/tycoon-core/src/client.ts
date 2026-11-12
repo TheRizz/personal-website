@@ -601,6 +601,13 @@ export class TycoonController {
     return outcome;
   }
 
+  /** Spends AP on a higher offline cap, and saves at once so it holds for the next time away. */
+  raiseOfflineCap(): Outcome {
+    const outcome = this.act({ a: "offline" });
+    if (outcome.ok) void this.save();
+    return outcome;
+  }
+
   // ---- saving ----
 
   /**

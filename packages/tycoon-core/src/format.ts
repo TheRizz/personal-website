@@ -77,6 +77,7 @@ const UNDONE_NOUNS: Record<Undone["a"], [string, string]> = {
   up: ["upgrade", "upgrades"],
   gold: ["golden packet", "golden packets"],
   migrate: ["migration", "migrations"],
+  offline: ["offline cap raise", "offline cap raises"],
 };
 
 const UNDONE_REASONS: Record<string, string> = {
@@ -86,6 +87,8 @@ const UNDONE_REASONS: Record<string, string> = {
   not_visible: "not on screen by the server's clock",
   gone: "already caught",
   too_early: "not enough progress by the server's count",
+  too_few_ap: "not enough Architecture Points by the server's count",
+  max_level: "already at the highest cap",
 };
 
 /** "The server undid 12 clicks (faster than 20 a second) and 1 purchase (…)." */

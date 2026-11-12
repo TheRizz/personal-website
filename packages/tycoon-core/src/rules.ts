@@ -16,10 +16,21 @@ import { goldenSpawn, type GoldenKind } from "./golden";
  * Bumped whenever a rule or number changes, so the server can refuse clients that would replay
  * differently (docs/04-pipeline-tycoon.md §2.1). `upgradeState` migrates stored saves forward.
  */
-export const RULES_VERSION = 3;
+export const RULES_VERSION = 4;
 
-/** Offline time is credited up to this much, by the server's clock. */
-export const OFFLINE_CAP_MS = 8 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+/** Offline time is credited up to this much, by the server's clock, until the cap is raised. */
+export const OFFLINE_CAP_MS = 8 * HOUR_MS;
+/**
+ * The offline cap at each level (`GameState.offlineLevel`) and what reaching that level costs in
+ * Architecture Points (since rules v4). Spent AP stop counting towards production, so a higher cap
+ * is a trade, not a free unlock. Bought in the Migrate tab; kept through migrations.
+ */
+export const OFFLINE_LEVELS: readonly { capMs: number; costAp: number }[] = [
+  { capMs: OFFLINE_CAP_MS, costAp: 0 },
+  { capMs: 12 * HOUR_MS, costAp: 10 },
+  { capMs: 24 * HOUR_MS, costAp: 100 },
+];
 /** Each Architecture Point is a permanent +100 % production (tuned with the pacing bot). */
 export const AP_BONUS = 1;
 /** Records earned in one run for the first Architecture Point; AP grow with the square root. */
@@ -56,8 +67,10 @@ export interface GameState {
   owned: number[];
   /** Upgrade ids bought this run. */
   upgrades: string[];
-  /** Architecture Points. */
+  /** Architecture Points (unspent; each one boosts production). */
   ap: number;
+  /** Index into OFFLINE_LEVELS: how far the offline cap has been raised (since rules v4). */
+  offlineLevel: number;
   migrations: number;
   achievements: string[];
   goldenCaught: number;
@@ -87,6 +100,7 @@ export function newGame(): GameState {
     owned: GENERATORS.map(() => 0),
     upgrades: [],
     ap: 0,
+    offlineLevel: 0,
     migrations: 0,
     achievements: [],
     goldenCaught: 0,
@@ -200,6 +214,16 @@ export function availableUpgrades(state: GameState): Upgrade[] {
       meets(state, upgrade.requires) &&
       !(upgrade.effect.kind === "ending" && state.ended),
   );
+}
+
+/** How much time away is credited for this state (OFFLINE_LEVELS). */
+export function offlineCapMs(state: GameState): number {
+  return (OFFLINE_LEVELS[state.offlineLevel] ?? OFFLINE_LEVELS[0]!).capMs;
+}
+
+/** The next offline cap raise, or null at the top. */
+export function nextOfflineLevel(state: GameState): { capMs: number; costAp: number } | null {
+  return OFFLINE_LEVELS[state.offlineLevel + 1] ?? null;
 }
 
 /** Architecture Points a migration right now would add. */
@@ -332,7 +356,8 @@ export type Action =
   | { t: number; a: "buy"; g: number; n: number }
   | { t: number; a: "up"; id: string }
   | { t: number; a: "gold"; i: number }
-  | { t: number; a: "migrate" };
+  | { t: number; a: "migrate" }
+  | { t: number; a: "offline" };
 
 /** What happened when an action was applied; `ok: false` means it was dropped. */
 export type Outcome =
@@ -416,6 +441,17 @@ export function migrate(state: GameState): Outcome {
   return { ok: true };
 }
 
+/** Spends Architecture Points to raise the offline cap one level (OFFLINE_LEVELS). */
+export function raiseOfflineCap(state: GameState): Outcome {
+  const next = nextOfflineLevel(state);
+  if (!next) return { ok: false, reason: "max_level" };
+  if (state.ap < next.costAp) return { ok: false, reason: "too_few_ap" };
+  state.ap -= next.costAp;
+  state.offlineLevel += 1;
+  checkAchievements(state);
+  return { ok: true };
+}
+
 /** Applies one action at the state's current time. Invalid actions change nothing. */
 export function apply(state: GameState, action: Action): Outcome {
   switch (action.a) {
@@ -429,6 +465,8 @@ export function apply(state: GameState, action: Action): Outcome {
       return catchGolden(state, action.i);
     case "migrate":
       return migrate(state);
+    case "offline":
+      return raiseOfflineCap(state);
   }
 }
 

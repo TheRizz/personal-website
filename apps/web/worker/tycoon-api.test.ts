@@ -123,6 +123,30 @@ describe("sessions", () => {
     expect(s.offline.earned).toBeLessThan((OFFLINE_CAP_MS / 1000) * 1.1);
   });
 
+  it("credits up to 12 hours once the player spends AP on a higher cap", async () => {
+    const auth = await newPlayer(0);
+    await session(auth, 0);
+    const [id] = auth.split(".");
+    // A player with 10 AP and a cron job (migrations take far longer than a test).
+    const stored = JSON.parse(
+      (sqlite.prepare("SELECT state FROM players WHERE id = ?").all(id)[0] as { state: string })
+        .state,
+    ) as GameState;
+    stored.ap = 10;
+    stored.owned[1] = 1;
+    sqlite.prepare("UPDATE players SET state = ? WHERE id = ?").run(JSON.stringify(stored), id);
+
+    let s = await session(auth, 0);
+    const saved = await save(auth, 1_000, s, 1_000, [{ t: 500, a: "offline" }]);
+    expect(saved.status).toBe(200);
+    expect(saved.json.state.offlineLevel).toBe(1);
+    expect(saved.json.state.ap).toBe(0);
+
+    s = await session(auth, 1_000 + 3 * OFFLINE_CAP_MS);
+    expect(s.offline.ms).toBe(12 * HOUR);
+    expect(s.state.offlineLevel).toBe(1);
+  });
+
   it("brings a rules-v2 save up to date and credits the idle achievement from time away", async () => {
     const auth = await newPlayer(0);
     await session(auth, 0);

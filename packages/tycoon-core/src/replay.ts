@@ -1,4 +1,4 @@
-import { OFFLINE_CAP_MS, advance, apply, cloneState, type Action, type GameState } from "./rules";
+import { advance, apply, cloneState, offlineCapMs, type Action, type GameState } from "./rules";
 
 /** Autoclickers get at most this many clicks a second (with a burst of the same size). */
 export const MAX_CLICKS_PER_SECOND = 20;
@@ -52,7 +52,7 @@ export interface ReplayResult {
 /**
  * Re-runs a log from `start` (ADR-0006). At most `maxCreditMs` of play time is credited: if the
  * client claims more, its action times are scaled down to fit. Gaps between actions are capped at
- * OFFLINE_CAP_MS. Actions the replayed state can't perform are dropped, never fatal. `start` is
+ * the state's offline cap (offlineCapMs). Actions the replayed state can't perform are dropped, never fatal. `start` is
  * not modified.
  */
 export function replay(start: GameState, log: SaveLog, maxCreditMs = Infinity): ReplayResult {
@@ -67,7 +67,7 @@ export function replay(start: GameState, log: SaveLog, maxCreditMs = Infinity): 
   let clickTokens = MAX_CLICKS_PER_SECOND;
   const pass = (ms: number) => {
     if (ms <= 0) return;
-    advance(state, Math.min(ms, OFFLINE_CAP_MS));
+    advance(state, Math.min(ms, offlineCapMs(state)));
     clickTokens = Math.min(
       MAX_CLICKS_PER_SECOND,
       clickTokens + (ms * MAX_CLICKS_PER_SECOND) / 1000,
@@ -105,13 +105,13 @@ export function replay(start: GameState, log: SaveLog, maxCreditMs = Infinity): 
   return { state, creditedMs, dropped };
 }
 
-/** Offline earnings when a session starts: up to OFFLINE_CAP_MS since the last save. */
+/** Offline earnings when a session starts: up to the state's offline cap since the last save. */
 export function applyOffline(
   start: GameState,
   awayMs: number,
 ): { state: GameState; creditedMs: number; earned: number } {
   const state = cloneState(start);
-  const creditedMs = Math.min(Math.max(0, awayMs), OFFLINE_CAP_MS);
+  const creditedMs = Math.min(Math.max(0, awayMs), offlineCapMs(start));
   const before = state.lifetimeRecords;
   advance(state, creditedMs);
   return { state, creditedMs, earned: state.lifetimeRecords - before };
